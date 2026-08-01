@@ -1,0 +1,32 @@
+{
+  "name": "@mba/sprite-react",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
+    }
+  },
+  "scripts": {
+    "build": "vp pack src/index.tsx --dts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vp test run",
+    "lint": "vp lint -c ../../.oxlintrc.json --deny-warnings",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check"
+  },
+  "dependencies": {
+    "@mba/sprite": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.17",
+    "react": "^19.2.8"
+  }
+}

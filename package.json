@@ -1,0 +1,25 @@
+{
+  "name": "monster-battle-app",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @mba/api --filter @mba/web --filter @mba/admin run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "fmt": "pnpm -r run fmt",
+    "fmt:check": "pnpm -r run fmt:check"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.0",
+    "tsx": "4.19.2",
+    "typescript": "7.0.2",
+    "vite-plus": "^0.2.1",
+    "vitest": "4.1.10"
+  }
+}

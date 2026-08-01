@@ -1,0 +1,13 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+
+# pnpm 11 blocks dependency install/build scripts by default (supply-chain
+# hardening). Without this, the first `pnpm install` writes an unresolved
+# placeholder here and every later pnpm command fails until it's fixed by hand.
+# Both entries below run a native build at install time and are needed for:
+#   esbuild          — used internally by vite/vite-plus/tsx/vitest
+#   better-sqlite3   — compiles its SQLite bindings (or fetches a prebuilt binary)
+allowBuilds:
+  esbuild: true
+  better-sqlite3: true

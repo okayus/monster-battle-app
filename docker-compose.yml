@@ -1,0 +1,45 @@
+# Local development: bind-mounts the repo, installs deps, and runs all three
+# dev servers with hot reload.
+#
+#   :5173  player SPA   (game + settings + skin editor)
+#   :5174  admin SPA    (monster / map authoring)
+#   :3000  API          (Hono)
+#
+# Both SPAs proxy /api to :3000, so the browser only ever talks to one origin
+# and there is no CORS to configure.
+#
+# For a production-shaped single-container run, use the `prod` stage directly
+# (see README.md).
+services:
+  dev:
+    build:
+      context: .
+      target: dev
+    container_name: monster-battle-app-dev
+    working_dir: /app
+    ports:
+      - "5173:5173" # player SPA (Vite)
+      - "5174:5174" # admin SPA (Vite)
+      - "3000:3000" # API (Hono)
+    volumes:
+      - .:/app
+      # Anonymous volumes so the bind mount above doesn't shadow each
+      # package's installed node_modules with the (empty) host directory.
+      - /app/node_modules
+      - /app/apps/api/node_modules
+      - /app/apps/web/node_modules
+      - /app/apps/admin/node_modules
+      - /app/packages/core/node_modules
+      - /app/packages/sprite/node_modules
+      - /app/packages/sprite-react/node_modules
+      - /app/packages/db/node_modules
+      - sqlite-data:/app/data
+    environment:
+      DATABASE_URL: file:/app/data/app.db
+      PORT: "3000"
+    init: true
+    tty: true
+    command: sh -c "pnpm install && pnpm dev"
+
+volumes:
+  sqlite-data:

@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // tsc here is only ever used for `--noEmit` typechecking — tsdown (`vp
+    // pack`) does the real build — so there is no outDir/rootDir to keep
+    // consistent and no declarations to emit for an app that is never consumed
+    // as a library. Without this, TS6059 fires: the `paths` below point outside
+    // apps/api/src, which conflicts with rootDir/outDir bookkeeping.
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "types": ["node"],
+    "paths": {
+      // Dev (tsx) resolves these straight from source, so there is no prebuild
+      // step. At runtime `node dist/index.mjs` resolves them through the pnpm
+      // workspace symlinks to each package's dist/ instead.
+      //
+      // Note what is absent: @mba/sprite-react. The API validates skins but
+      // never renders them, so React stays out of its dependency graph.
+      "@mba/core": ["../../packages/core/src/index.ts"],
+      "@mba/db": ["../../packages/db/src/index.ts"],
+      "@mba/sprite": ["../../packages/sprite/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist"]
+}

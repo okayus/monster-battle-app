@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "noEmit": true,
+    // Never emitted (a browser app is not consumed as a library), and turning
+    // it off avoids TS demanding a portable type annotation for vite.config.ts.
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      "@mba/core": ["../../packages/core/src/index.ts"],
+      "@mba/sprite": ["../../packages/sprite/src/index.ts"],
+      "@mba/sprite-react": ["../../packages/sprite-react/src/index.tsx"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}

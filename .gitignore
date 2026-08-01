@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+dist/
+*.tsbuildinfo
+data/
+.env
+.DS_Store
+
+# `vp pack --dts` emits a declaration next to the source of any workspace
+# package it bundles from source (see packages/sprite-react/tsconfig.json's
+# `paths`). Build artifact, not source.
+packages/*/src/**/*.d.ts

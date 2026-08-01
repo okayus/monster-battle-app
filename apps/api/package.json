@@ -1,0 +1,27 @@
+{
+  "name": "@mba/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "vp pack src/index.ts",
+    "start": "node dist/index.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "vp lint -c ../../.oxlintrc.json --deny-warnings",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.12",
+    "@mba/core": "workspace:*",
+    "@mba/db": "workspace:*",
+    "@mba/sprite": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.12.32",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.0"
+  }
+}

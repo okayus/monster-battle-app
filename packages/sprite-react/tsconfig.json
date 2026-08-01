@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    // tsc here only typechecks — tsdown (`vp pack --dts`) does the real build
+    // and emits the declarations. Without noEmit/declaration:false, TS6059
+    // fires: the `paths` entry below points outside this package's src/, which
+    // conflicts with rootDir's structure-preserving-emission bookkeeping.
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "paths": {
+      // Typecheck against @mba/sprite's source so a clean clone can run
+      // `pnpm typecheck` without building first. At build time `vp pack`
+      // resolves it through the pnpm workspace symlink to its dist/ instead,
+      // and `pnpm -r run build` guarantees sprite is built beforehand.
+      "@mba/sprite": ["../sprite/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist"]
+}
