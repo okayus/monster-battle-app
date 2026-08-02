@@ -16,6 +16,10 @@ services:
       context: .
       target: dev
     container_name: monster-battle-app-dev
+    # Non-root. The Dockerfile already sets USER node; stating it here too makes
+    # the intent visible from the compose file, which is where someone adding a
+    # new bind mount will be looking. See the Dockerfile's dev stage for why.
+    user: node
     working_dir: /app
     ports:
       - "5173:5173" # player SPA (Vite)

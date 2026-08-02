@@ -26,7 +26,29 @@ WORKDIR /app
 # ---- dev -------------------------------------------------------------------
 # docker-compose bind-mounts the repo over /app; `pnpm install` and the dev
 # servers run as the compose service's `command`, not baked into the image.
+#
+# Runs as the image's non-root `node` user (uid 1000). A bind mount passes uids
+# through numerically — there is no translation — so a container running as root
+# would leave root-owned node_modules/dist on the host, and, more importantly,
+# would give any dependency's postinstall script root-level write access to the
+# mounted source tree (including .git/hooks). uid 1000 matches the first regular
+# user on a typical Linux host, so files come out owned by you.
+#
+# The mkdir matters: a volume mounted at a path that does not exist in the image
+# is created root-owned, and the non-root user then cannot write to it. Every
+# mount point in docker-compose.yml must therefore exist here, owned by node.
 FROM base AS dev
+RUN mkdir -p /app/node_modules \
+      /app/apps/api/node_modules \
+      /app/apps/web/node_modules \
+      /app/apps/admin/node_modules \
+      /app/packages/core/node_modules \
+      /app/packages/sprite/node_modules \
+      /app/packages/sprite-react/node_modules \
+      /app/packages/db/node_modules \
+      /app/data \
+    && chown -R node:node /app
+USER node
 EXPOSE 3000 5173 5174
 
 # ---- builder (intermediate only, not a compose target) ---------------------
@@ -42,6 +64,9 @@ RUN pnpm -r run build
 # image as `builder` so better-sqlite3's compiled native addon stays compatible.
 FROM base AS prod
 ENV NODE_ENV=production
-COPY --from=builder /app /app
+COPY --from=builder --chown=node:node /app /app
+# The SQLite volume is mounted here, so it must exist and be writable by node.
+RUN mkdir -p /app/data && chown node:node /app/data
+USER node
 EXPOSE 3000
 CMD ["node", "apps/api/dist/index.mjs"]

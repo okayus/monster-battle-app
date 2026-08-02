@@ -52,8 +52,13 @@ docker compose logs -f dev   # 3 つの開発サーバの起動を見る
 
 **依存のインストールとコードの実行はコンテナ内で完結する。** ホストで `pnpm install` する必要はない。
 
-コンテナは root で動くので、`node_modules/` や `dist/` はホストから見ると root 所有になる。
-消したいときはホストで `sudo rm` せず、コンテナ側から消す（`docker compose exec dev rm -rf dist`）。
+コンテナは**非 root（`node` / uid 1000）で動く**ので、生成されるファイルはホストから見ても自分の所有になる。
+バインドマウントは uid を数値のまま素通しするだけで変換しないため、ここを root にすると
+`node_modules` や `dist` が root 所有になるだけでなく、**依存の postinstall スクリプトが
+ホストのソースツリー（`.git/hooks` を含む）に root 権限で書き込める**状態になる。詳細は Dockerfile の dev ステージのコメント。
+
+ホストの `node_modules/` と `data/` は空のディレクトリに見えるが、これは正常。中身は Docker のボリューム側にあり、
+ホスト側は volume を取り付けるためのマウント点でしかない（Docker が作るので root 所有だが、空なので普通に削除できる）。
 
 ## 開発（Docker 無し）
 
