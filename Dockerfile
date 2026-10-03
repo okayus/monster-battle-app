@@ -69,4 +69,8 @@ COPY --from=builder --chown=node:node /app /app
 RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3000
+# Started directly, so node is PID 1 — and PID 1 gets no default signal handling
+# from the kernel. apps/api/src/index.ts handles SIGTERM / SIGINT itself, which is
+# why `docker stop` returns at once without `--init`. The static file roots in
+# that file are relative to the working directory, so this has to run from /app.
 CMD ["node", "apps/api/dist/index.mjs"]

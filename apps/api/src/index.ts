@@ -49,8 +49,33 @@ if (process.env.NODE_ENV === "production") {
   app.use("/*", serveStatic({ root: "./apps/web/dist" }));
 }
 
-serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
+const server = serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
   console.log(
     `api listening on http://0.0.0.0:${info.port} (db: ${DATABASE_URL}, migrations: ${applied})`,
   );
 });
+
+/** Longer than any request here should take, shorter than `docker stop` is willing to wait. */
+const SHUTDOWN_GRACE_MS = 5000;
+
+/**
+ * Stops on request: no new connections, requests in flight get to finish, the
+ * database is closed, and the process exits by itself.
+ *
+ * This has to be written down because in the production container this
+ * process is PID 1, and the kernel gives PID 1 no default reaction to a
+ * signal. Without a handler `docker stop` sends SIGTERM, nothing happens, and
+ * ten seconds later the process is killed outright.
+ */
+function shutdown(signal: NodeJS.Signals): void {
+  console.log(`${signal} received, shutting down`);
+  server.close(() => {
+    db.$client.close();
+    process.exit(0);
+  });
+  // A connection that never finishes must not be able to hold the exit up.
+  setTimeout(() => process.exit(1), SHUTDOWN_GRACE_MS).unref();
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
