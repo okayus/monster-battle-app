@@ -10,3 +10,7 @@ data/
 # package it bundles from source (see packages/sprite-react/tsconfig.json's
 # `paths`). Build artifact, not source.
 packages/*/src/**/*.d.ts
+
+# What an end-to-end run leaves behind, once copied out of the test container
+# to be looked at (docs/06-testing.md).
+e2e/test-results/

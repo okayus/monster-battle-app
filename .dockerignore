@@ -16,3 +16,10 @@ data
 # Never bake local secrets into an image. (.gitignore keeps this file out of
 # the repository; this keeps it out of the build context as well.)
 .env
+
+# The end-to-end tests are built from their own context (e2e/Dockerfile), and
+# the workflow files are not part of any image. Keeping them out of this
+# context also means that editing a test does not invalidate the layer that
+# installs the app's dependencies.
+e2e
+.github

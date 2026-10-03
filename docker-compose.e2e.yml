@@ -1,0 +1,66 @@
+# End-to-end run: the production image, and a browser pointed at it.
+#
+#   docker compose -f docker-compose.e2e.yml up --build --exit-code-from e2e
+#   docker compose -f docker-compose.e2e.yml down
+#
+# The first command builds both images, starts the app, runs the tests against
+# it and exits with the tests' exit code. CI runs exactly this.
+#
+# Nothing is published to the host, so it runs alongside the dev container
+# without fighting over ports. The project name is separate for the same
+# reason: `down` here cannot touch the dev container or its database.
+name: monster-battle-app-e2e
+
+services:
+  # The thing under test: the same `prod` stage `docker build --target prod`
+  # produces, not a dev server.
+  server:
+    build:
+      context: .
+      target: prod
+    # A database that lives in memory and dies with the container, so every
+    # run starts from a freshly migrated and seeded one. It is still a file to
+    # the app (WAL and all), unlike `:memory:`.
+    #
+    # The owner has to be spelled out: a tmpfs is mounted root-owned and 755,
+    # and the app runs as `node` (uid 1000), which then cannot create the file.
+    tmpfs:
+      - /app/data:uid=1000,gid=1000
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        # Quoted: unquoted, the `? 0 : 1` in it reads as a YAML mapping.
+        - 'fetch("http://127.0.0.1:3000/api/health").then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))'
+      interval: 1s
+      timeout: 3s
+      retries: 30
+
+  e2e:
+    build:
+      context: ./e2e
+    # The tests share the app container's network, and reach it at 127.0.0.1.
+    #
+    # The obvious way — a network of their own, and the app addressed by its
+    # service name — failed twice, in ways worth knowing (docs/06-testing.md):
+    #
+    #  - A service called `app` cannot be opened by Chromium at all. The whole
+    #    `.app` top-level domain is on its HSTS preload list, so http://app:3000
+    #    is silently turned into https and every page load fails.
+    #  - Under any other name, about one request in fifteen from the test
+    #    runner stalled for five seconds. Playwright looks the name up once per
+    #    address family; a service has no IPv6 address, so that lookup leaves
+    #    Docker's resolver for the upstream one, and waits for it to say no.
+    #
+    # An address needs no lookup and has no HSTS entry, so both go away.
+    network_mode: service:server
+    environment:
+      BASE_URL: http://127.0.0.1:3000
+      CI: ${CI:-}
+    depends_on:
+      server:
+        condition: service_healthy
+    # Chromium uses shared memory heavily, and a container gets 64 MB of it
+    # by default — not enough, and the symptom is a tab that just crashes.
+    shm_size: 1gb
