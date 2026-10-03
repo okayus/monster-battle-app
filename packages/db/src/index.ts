@@ -39,7 +39,9 @@ export function createDb(databaseUrl: string) {
  */
 export function runMigrations(db: Db): { applied: number } {
   const raw = db.$client;
-  raw.exec("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)");
+  raw.exec(
+    "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)",
+  );
 
   const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
   let files: string[];

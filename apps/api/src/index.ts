@@ -35,10 +35,18 @@ app.get("/api/health", (c) => c.json({ status: "ok", migrationsApplied: applied 
 
 if (process.env.NODE_ENV === "production") {
   // One container, one port: the API also serves both SPA builds.
-  app.use("/admin/*", serveStatic({ root: "./apps/admin/dist", rewriteRequestPath: (p) => p.replace(/^\/admin/, "") }));
+  app.use(
+    "/admin/*",
+    serveStatic({
+      root: "./apps/admin/dist",
+      rewriteRequestPath: (p) => p.replace(/^\/admin/, ""),
+    }),
+  );
   app.use("/*", serveStatic({ root: "./apps/web/dist" }));
 }
 
 serve({ fetch: app.fetch, port: PORT, hostname: "0.0.0.0" }, (info) => {
-  console.log(`api listening on http://0.0.0.0:${info.port} (db: ${DATABASE_URL}, migrations: ${applied})`);
+  console.log(
+    `api listening on http://0.0.0.0:${info.port} (db: ${DATABASE_URL}, migrations: ${applied})`,
+  );
 });
