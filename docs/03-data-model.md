@@ -13,7 +13,7 @@
 
 ## テーブル方針
 
-`packages/db/src/schema.ts` には `users` だけが定義してある。以下はスライスを実装するたびに足す。
+`packages/db/src/schema.ts` に定義済みなのは `users` と `skins`。残りはスライスを実装するたびに足す。
 
 ### マスターデータ（管理画面が編集する）
 
@@ -45,6 +45,28 @@
 
 両方を持つのは重複に見えるが、**書き込み時に 1 回変換して読み取りを軽くする**という意図的な非正規化。
 `source` から `renderable` はいつでも再生成できるので、真実は `source` にある。
+
+どちらも JSON を TEXT で持つ。**`@mba/db` はその中身の形を知らない**（`@mba/sprite` に依存しない）。
+入力を `Skin` にするのは API の `parseSkin()` で、DB 層は渡された文字列をしまうだけ。
+行の型を `SkinRow` と呼んで `Skin` と区別しているのも同じ理由（下の「型はどこに置くか」）。
+
+## マイグレーション
+
+`schema.ts` を変えたら、コンテナ内で SQL を生成する。
+
+```sh
+docker compose exec dev pnpm --filter @mba/db run db:generate --name <内容を表す名前>
+```
+
+- **`--name` を必ず付ける。** 省くと drizzle-kit がランダムな名前を付けるが、その語彙には
+  既存作品のキャラクター名が含まれている。public リポジトリに固有名詞を持ち込まない、というルールに触れる。
+- **適用されるのは API の起動時だけ。** `runMigrations()` が `drizzle/*.sql` をファイル名順に 1 回ずつ流す。
+  開発サーバ（`tsx watch`）は `.sql` を監視していないので、生成した後は API を再起動する
+  （`docker compose restart dev`）。
+- **適用済みのファイルは書き換えない。** 適用したかどうかはファイル名で記録しているので、
+  中身を直しても二度と流れない。変更は新しいマイグレーションとして足す。
+- **`drizzle/` は整形の対象から外してある**（`packages/db/.prettierignore`）。drizzle-kit が生成のたびに
+  書き直すファイルなので、整形すると毎回差分が出る。
 
 ## 削除しない
 

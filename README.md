@@ -86,7 +86,7 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 | `pnpm build` | 依存順に全パッケージ・全アプリをビルド |
 | `pnpm test` | テストのあるパッケージで Vitest |
 | `pnpm typecheck` / `pnpm lint` / `pnpm fmt` | ワークスペース全体 |
-| `pnpm --filter @mba/db run db:generate` | `packages/db/src/schema.ts` を変えた後に SQL マイグレーションを再生成 |
+| `pnpm --filter @mba/db run db:generate --name <名前>` | `packages/db/src/schema.ts` を変えた後に SQL マイグレーションを生成。`--name` は必須（[docs/03](docs/03-data-model.md) §マイグレーション） |
 
 ## ドキュメント
 
@@ -102,9 +102,17 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 ## 現在の状態
 
-**Step 1（スキンの形式）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
+**Step 2（スキンを保存して表示する）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
 
-- `@mba/sprite` … `parseSkin()`（検証）と `toRenderable()`（矩形結合）を実装済み。単体テストあり
-- `@mba/sprite-react` … `<Sprite>` が手書きのサンプルスキンを描けることをテストで確認済み
-- それ以外 … 疎通確認（`/api/health` と、それを叩く各 SPA の骨組み）まで。スキンはまだ保存できず、
-  `@mba/core` の関数は未実装であることが分かる形にしてある
+最初の縦の串が通っている。
+
+```
+エディタ（最小） → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示
+```
+
+- `@mba/sprite` … `parseSkin()`（検証）と `toRenderable()`（矩形結合）。単体テストあり
+- `@mba/sprite-react` … `<Sprite>`。手書きのサンプルスキンを描けることをテストで確認済み
+- `@mba/db` … `users` と `skins`。最初のマイグレーションを生成済み
+- `@mba/api` … スキンの保存と取得。インメモリの SQLite でハンドラをテストしている
+- `@mba/web` … 最小のエディタ（1 パーツ・1 コマ・固定の数色）と、保存したスキンの表示
+- まだ無いもの … マップ、バトル、管理画面の中身。`@mba/core` の関数は未実装であることが分かる形にしてある

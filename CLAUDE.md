@@ -47,12 +47,14 @@ docker compose up -d                       # 起動（初回はイメージビ�
 docker compose exec dev pnpm typecheck     # 型
 docker compose exec dev pnpm lint          # oxlint
 docker compose exec dev pnpm test          # vitest
-docker compose exec dev pnpm --filter @mba/db run db:generate   # スキーマ変更後
+docker compose exec dev pnpm --filter @mba/db run db:generate --name <名前>   # スキーマ変更後
 ```
 
 - **依存の追加も実行もコンテナ内で行う。** ホストで `pnpm install` しない。
 - 開発サーバ: プレイヤー `:5173` / 管理 `:5174` / API `:3000`。両 SPA は `/api` を `:3000` へプロキシするので CORS は不要。
 - SQLite は名前付きボリューム。`docker compose down -v` でだけ消える。
+- マイグレーションは `--name` を必ず付けて生成する（省くとランダムな名前に固有名詞が混ざる）。
+  適用は API の起動時だけなので、生成後は `docker compose restart dev`。詳細は docs/03 §マイグレーション。
 
 ## 迷ったときの判断基準
 
