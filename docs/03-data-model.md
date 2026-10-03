@@ -29,7 +29,7 @@
 
 | テーブル | 主な列 | 補足 |
 |---|---|---|
-| `users` | id, display_name, created_at | ローカル学習用。認証は docs/04 参照 |
+| `users` | id, display_name, is_admin, created_at | ローカル学習用。認証は docs/04 参照。`is_admin` は管理 API を使ってよいか |
 | `saves` | user_id, map_id, x, y, updated_at | セーブデータ。1 ユーザー 1 行（`user_id` が主キー）なので、保存は上書きになる |
 | `owned_monsters` | id, user_id, species_id, nickname, created_at | 所持モンスター。`level` / `exp` / `hp` は成長を作るときに足す |
 | `battles` | id, user_id, status, state, created_at, updated_at | バトル。`state` が状態のすべて（JSON） |
@@ -123,6 +123,9 @@ docker compose exec dev pnpm --filter @mba/db run db:generate --name <内容を�
 
 **マスターもスキンも物理削除しない。** セーブデータや所持モンスターが参照しているため。
 `retired_at`（または `status`）を立てて、提示から外すだけにする。
+
+retire はまだ実装していない。今は消す手段も、提示から外す手段も無い。間違えて作った種族は、
+どのマップの出現にも入れなければ表に出ない。間違えて作ったマップは、そこへ行く手段が無いので見えない。
 
 参照先が retire されていた場合の表示は、**呼び出し側ではなく取得層でフォールバック**させる
 （既定スキン・不明な種族の扱いを 1 箇所に置く）。画面ごとに `if (!species) return null` を書き散らさない。
