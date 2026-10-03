@@ -8,7 +8,11 @@
  * input they gave it.
  */
 
-import type { NewSkinRow } from "@mba/db";
+import { asc, eq } from "drizzle-orm";
+
+import type { SkinSummary } from "@mba/core";
+import { skins } from "@mba/db";
+import type { Db, NewSkinRow } from "@mba/db";
 import { toRenderable } from "@mba/sprite";
 import type { Skin } from "@mba/sprite";
 
@@ -24,4 +28,20 @@ export function skinRow(id: string, ownerId: string | null, skin: Skin, now: Dat
     renderable: JSON.stringify(toRenderable(skin)),
     createdAt: now,
   };
+}
+
+/**
+ * Every skin there is, by name and owner only. The drawings themselves stay
+ * out of a list: whoever wants to see one asks for it by id.
+ */
+export function listSkins(db: Db): SkinSummary[] {
+  return db
+    .select({ id: skins.id, name: skins.name, ownerId: skins.ownerId })
+    .from(skins)
+    .orderBy(asc(skins.createdAt), asc(skins.id))
+    .all();
+}
+
+export function skinExists(db: Db, id: string): boolean {
+  return db.select({ id: skins.id }).from(skins).where(eq(skins.id, id)).get() !== undefined;
 }

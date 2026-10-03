@@ -17,6 +17,7 @@ import { Hono } from "hono";
 
 import type { Db } from "@mba/db";
 
+import { adminRoutes } from "./routes/admin.js";
 import { battleRoutes } from "./routes/battles.js";
 import { mapRoutes } from "./routes/maps.js";
 import { saveRoutes } from "./routes/save.js";
@@ -44,8 +45,11 @@ export function createApp({ db, migrationsApplied, random }: AppDeps) {
   app.route("/api/save", saveRoutes(db));
   app.route("/api/battles", battleRoutes(db, random));
 
+  // Everything under this prefix goes through one authorization check, which
+  // the admin router attaches to itself.
+  app.route("/api/admin", adminRoutes(db));
+
   // TODO: the rest of the game API — see docs/04-api-design.md §ゲーム API
-  // TODO: /api/admin/*              — see docs/04-api-design.md §管理 API
 
   return app;
 }

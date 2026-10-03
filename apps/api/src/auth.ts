@@ -12,7 +12,8 @@
  * caller is does not help if the caller gets to say who they are acting as.
  */
 
-import type { Context } from "hono";
+import { eq } from "drizzle-orm";
+import type { Context, MiddlewareHandler } from "hono";
 
 import { users } from "@mba/db";
 import type { Db } from "@mba/db";
@@ -31,7 +32,34 @@ export function getUserId(_c: Context): string {
  */
 export function ensureLocalUser(db: Db): void {
   db.insert(users)
-    .values({ id: LOCAL_USER_ID, displayName: "プレイヤー", createdAt: new Date() })
-    .onConflictDoNothing()
+    .values({ id: LOCAL_USER_ID, displayName: "プレイヤー", isAdmin: true, createdAt: new Date() })
+    // The local user is whoever is running this app on their own machine, so
+    // they are its admin — including in a database that was created before
+    // the flag existed, which is why this updates instead of doing nothing.
+    .onConflictDoUpdate({ target: users.id, set: { isAdmin: true } })
     .run();
+}
+
+/**
+ * The guard on the admin API.
+ *
+ * Two separate questions meet here. Who is asking is `getUserId(c)`, the same
+ * as everywhere else. Whether they may is a fact about that user, read from
+ * the database. Real authentication will change how the first is answered and
+ * leave the second alone.
+ *
+ * It is attached once, to the router every admin route lives in (see
+ * routes/admin.ts), not to each route — so a route added later cannot be left
+ * unguarded by forgetting a line.
+ */
+export function requireAdmin(db: Db): MiddlewareHandler {
+  return async (c, next) => {
+    const user = db
+      .select({ isAdmin: users.isAdmin })
+      .from(users)
+      .where(eq(users.id, getUserId(c)))
+      .get();
+    if (user?.isAdmin !== true) return c.json({ error: { kind: "forbidden" } }, 403);
+    await next();
+  };
 }

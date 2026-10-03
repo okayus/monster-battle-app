@@ -6,11 +6,11 @@
  * docs/05-roadmap.md); until that exists, the only map is the one seeded here.
  */
 
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
 import { err, ok } from "@mba/core";
-import type { GameMap, Position, Result, TileKind } from "@mba/core";
-import { maps } from "@mba/db";
+import type { AdminMap, Encounter, GameMap, MapInput, Position, Result, TileKind } from "@mba/core";
+import { mapEncounters, maps } from "@mba/db";
 import type { Db } from "@mba/db";
 
 /** The map a player with no save starts on. */
@@ -35,6 +35,63 @@ export function findMap(db: Db, id: string): GameMap | undefined {
     tiles: JSON.parse(row.tiles) as TileKind[],
     spawn: { x: row.spawnX, y: row.spawnY },
   };
+}
+
+// ---------------------------------------------------------------------------
+// What the admin API reads and writes
+// ---------------------------------------------------------------------------
+
+function encounterRowsOf(db: Db, mapId: string): Encounter[] {
+  return db
+    .select({ speciesId: mapEncounters.speciesId, weight: mapEncounters.weight })
+    .from(mapEncounters)
+    .where(eq(mapEncounters.mapId, mapId))
+    .orderBy(asc(mapEncounters.speciesId))
+    .all();
+}
+
+/** A map with who turns up on it — the shape the admin screen edits. */
+export function findAdminMap(db: Db, id: string): AdminMap | undefined {
+  const map = findMap(db, id);
+  return map === undefined ? undefined : { ...map, encounters: encounterRowsOf(db, id) };
+}
+
+export function listMaps(db: Db): AdminMap[] {
+  const ids = db.select({ id: maps.id }).from(maps).orderBy(asc(maps.name), asc(maps.id)).all();
+
+  const all: AdminMap[] = [];
+  for (const { id } of ids) {
+    const found = findAdminMap(db, id);
+    if (found !== undefined) all.push(found);
+  }
+  return all;
+}
+
+/**
+ * Creates or replaces a map together with its encounters, in one transaction,
+ * for the same reason a species is saved with its moves: they are edited as
+ * one thing. The encounters are replaced, so leaving a species out of the list
+ * is how it stops turning up.
+ */
+export function saveMap(db: Db, id: string, input: MapInput): void {
+  const row = {
+    name: input.name,
+    width: input.width,
+    height: input.height,
+    tiles: JSON.stringify(input.tiles),
+    spawnX: input.spawn.x,
+    spawnY: input.spawn.y,
+  };
+  db.transaction((tx) => {
+    tx.insert(maps)
+      .values({ id, ...row })
+      .onConflictDoUpdate({ target: maps.id, set: row })
+      .run();
+    tx.delete(mapEncounters).where(eq(mapEncounters.mapId, id)).run();
+    for (const { speciesId, weight } of input.encounters) {
+      tx.insert(mapEncounters).values({ mapId: id, speciesId, weight }).run();
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
