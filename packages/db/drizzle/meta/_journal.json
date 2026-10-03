@@ -8,6 +8,13 @@
       "when": 1791001635229,
       "tag": "0000_users_and_skins",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791004496593,
+      "tag": "0001_maps_and_saves",
+      "breakpoints": true
     }
   ]
 }
