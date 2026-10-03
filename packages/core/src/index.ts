@@ -126,7 +126,83 @@ export function step(from: Position, dir: Direction, map: TileMap): Position {
 }
 
 // ---------------------------------------------------------------------------
-// Monsters and battle (master data lives in the DB; these are the runtime shapes)
+// Randomness
+//
+// Nothing in this package draws a random number. Every function that needs one
+// takes it as an argument — a "roll" in [0, 1), the range Math.random() gives —
+// and the caller decides where it comes from. On the server that is the real
+// generator; in a test it is whatever number makes the case under test happen.
+// ---------------------------------------------------------------------------
+
+/**
+ * Pulls a roll back into [0, 1]. A roll from outside that range (or NaN) can
+ * then skew a result, but it cannot break one.
+ */
+function clamp01(roll: number): number {
+  if (!(roll > 0)) return 0; // also catches NaN
+  return roll > 1 ? 1 : roll;
+}
+
+/** Picks one of `items`, each equally likely. Undefined only when there are none. */
+function pick<T>(items: readonly T[], roll: number): T | undefined {
+  const index = Math.floor(clamp01(roll) * items.length);
+  return items[Math.min(items.length - 1, index)];
+}
+
+export interface Weighted<T> {
+  value: T;
+  weight: number;
+}
+
+/**
+ * Picks one entry, each with a chance proportional to its weight. Entries with
+ * no weight (zero, negative, not a number) are never picked; undefined when
+ * that leaves nothing to pick from.
+ */
+export function pickWeighted<T>(entries: readonly Weighted<T>[], roll: number): T | undefined {
+  const weightOf = (entry: Weighted<T>) =>
+    Number.isFinite(entry.weight) && entry.weight > 0 ? entry.weight : 0;
+
+  let total = 0;
+  for (const entry of entries) total += weightOf(entry);
+  if (total === 0) return undefined;
+
+  // Lay every weight end to end; the roll is a point on that line.
+  let remaining = clamp01(roll) * total;
+  let last: T | undefined;
+  for (const entry of entries) {
+    const weight = weightOf(entry);
+    if (weight === 0) continue;
+    if (remaining < weight) return entry.value;
+    remaining -= weight;
+    last = entry.value;
+  }
+  // The very end of the line (a roll of exactly 1) belongs to the last entry.
+  return last;
+}
+
+// ---------------------------------------------------------------------------
+// Encounters
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether wild monsters live on each kind of tile. Like walkability, this is
+ * derived from the kind and not stored on the map, so the same tile array
+ * answers "what is drawn here", "can I walk here" and "can I be attacked here".
+ */
+const WILD: Record<TileKind, boolean> = {
+  path: false,
+  grass: true,
+  tree: false,
+  water: false,
+};
+
+export function hasWildMonsters(kind: TileKind): boolean {
+  return WILD[kind];
+}
+
+// ---------------------------------------------------------------------------
+// Monsters (master data lives in the DB; these are the runtime shapes)
 // ---------------------------------------------------------------------------
 
 export interface Move {
@@ -142,32 +218,215 @@ export interface Species {
   maxHp: number;
   attack: number;
   defense: number;
-  moveIds: string[];
   /** Which skin to draw. The art itself is never part of master data. */
   skinId: string;
+  moves: Move[];
 }
 
-/** A monster a player owns: master data plus the mutable per-instance state. */
+/** A monster a player owns: a species, and what the player has made of it. */
 export interface OwnedMonster {
   id: string;
   species: Species;
   nickname: string | null;
-  level: number;
-  hp: number;
 }
 
 // ---------------------------------------------------------------------------
-// To implement (see docs/05-roadmap.md)
+// Battle
 // ---------------------------------------------------------------------------
 
-export type DomainError = { kind: "not_implemented" };
+/**
+ * One side of a battle.
+ *
+ * A snapshot, taken when the battle starts: the numbers are copied out of the
+ * species instead of referring to it. A battle in progress therefore keeps the
+ * stats it began with, even if the master data is edited halfway through.
+ */
+export interface Combatant {
+  name: string;
+  skinId: string;
+  maxHp: number;
+  hp: number;
+  attack: number;
+  defense: number;
+  moves: Move[];
+}
 
-/** Damage for one attack. Pure: any randomness is passed in, never drawn here. */
+/** A fresh combatant at full health. */
+export function combatantOf(species: Species, nickname: string | null = null): Combatant {
+  return {
+    name: nickname ?? species.name,
+    skinId: species.skinId,
+    maxHp: species.maxHp,
+    hp: species.maxHp,
+    attack: species.attack,
+    defense: species.defense,
+    moves: species.moves.map((move) => ({ id: move.id, name: move.name, power: move.power })),
+  };
+}
+
+/** The weakest a hit can land, as a fraction of the strongest. */
+const MIN_SPREAD = 0.85;
+
+/**
+ * Damage for one attack.
+ *
+ * Pure: `variance` is a roll the caller drew. 0 gives the weakest hit (85% of
+ * the full damage) and anything just under 1 gives the strongest.
+ */
 export function calcDamage(
-  _attacker: OwnedMonster,
-  _defender: OwnedMonster,
-  _move: Move,
-  _variance: number,
+  attacker: Pick<Combatant, "attack">,
+  defender: Pick<Combatant, "defense">,
+  move: Pick<Move, "power">,
+  variance: number,
 ): number {
-  throw new Error("not implemented — see docs/05-roadmap.md");
+  // A defense of zero would divide by zero, so anything below 1 counts as 1.
+  const base = (move.power * attacker.attack) / Math.max(1, defender.defense);
+  const spread = MIN_SPREAD + (1 - MIN_SPREAD) * clamp01(variance);
+  const damage = Math.floor(base * spread);
+  // Every hit lands for at least 1, which is what guarantees a battle ends.
+  // Written this way round so that NaN, too, comes out as 1.
+  return damage >= 1 ? damage : 1;
+}
+
+export type Side = "player" | "enemy";
+
+export type BattleStatus = "ongoing" | "won" | "lost";
+
+export interface BattleState {
+  /**
+   * How many turns have been played. The client sends this back with each
+   * move, which is how the server tells a move for *this* turn from the same
+   * request arriving twice.
+   */
+  turn: number;
+  status: BattleStatus;
+  player: Combatant;
+  enemy: Combatant;
+}
+
+export function startBattle(player: Combatant, enemy: Combatant): BattleState {
+  return { turn: 0, status: "ongoing", player, enemy };
+}
+
+/** Every random number one turn can need. Each is a roll in [0, 1). */
+export interface TurnRolls {
+  /** How hard the player's attack lands. */
+  playerVariance: number;
+  /** Which of its moves the enemy uses. */
+  enemyMove: number;
+  /** How hard the enemy's attack lands. */
+  enemyVariance: number;
+}
+
+/** What happened during a turn, in order. The screen turns these into text. */
+export type BattleEvent =
+  | { kind: "attack"; by: Side; move: string; damage: number }
+  | { kind: "fainted"; who: Side };
+
+export type BattleError = { kind: "battle_over" } | { kind: "unknown_move"; moveId: string };
+
+function hit(target: Combatant, damage: number): Combatant {
+  return { ...target, hp: Math.max(0, target.hp - damage) };
+}
+
+/**
+ * Plays one turn: the player's move, then — if it is still standing — the
+ * enemy's reply. Returns a new state; the one passed in is not changed.
+ *
+ * This is the whole judgement of a battle, and it lives here so that the
+ * server can run it. The browser never decides how much damage was done or who
+ * won; it sends a move id and is told what happened.
+ */
+export function playTurn(
+  state: BattleState,
+  moveId: string,
+  rolls: TurnRolls,
+): Result<{ state: BattleState; events: BattleEvent[] }, BattleError> {
+  if (state.status !== "ongoing") return err({ kind: "battle_over" });
+
+  const move = state.player.moves.find((candidate) => candidate.id === moveId);
+  if (move === undefined) return err({ kind: "unknown_move", moveId });
+
+  const turn = state.turn + 1;
+  const events: BattleEvent[] = [];
+
+  const dealt = calcDamage(state.player, state.enemy, move, rolls.playerVariance);
+  const enemy = hit(state.enemy, dealt);
+  events.push({ kind: "attack", by: "player", move: move.name, damage: dealt });
+  if (enemy.hp === 0) {
+    events.push({ kind: "fainted", who: "enemy" });
+    return ok({ state: { turn, status: "won", player: state.player, enemy }, events });
+  }
+
+  // An enemy with no moves has nothing to answer with, and the turn just ends.
+  const reply = pick(enemy.moves, rolls.enemyMove);
+  if (reply === undefined) {
+    return ok({ state: { turn, status: "ongoing", player: state.player, enemy }, events });
+  }
+
+  const taken = calcDamage(enemy, state.player, reply, rolls.enemyVariance);
+  const player = hit(state.player, taken);
+  events.push({ kind: "attack", by: "enemy", move: reply.name, damage: taken });
+  if (player.hp === 0) {
+    events.push({ kind: "fainted", who: "player" });
+    return ok({ state: { turn, status: "lost", player, enemy }, events });
+  }
+
+  return ok({ state: { turn, status: "ongoing", player, enemy }, events });
+}
+
+// ---------------------------------------------------------------------------
+// What the browser is shown
+// ---------------------------------------------------------------------------
+
+export interface CombatantView {
+  name: string;
+  skinId: string;
+  hp: number;
+  maxHp: number;
+}
+
+/**
+ * A battle as the screen needs it — which is less than the server knows.
+ * Attack, defense and the enemy's moves stay behind: nothing on the screen
+ * shows them, and what is not sent cannot be read out of a network tab.
+ */
+export interface BattleView {
+  id: string;
+  turn: number;
+  status: BattleStatus;
+  player: CombatantView & { moves: Move[] };
+  enemy: CombatantView;
+}
+
+function viewCombatant(combatant: Combatant): CombatantView {
+  return {
+    name: combatant.name,
+    skinId: combatant.skinId,
+    hp: combatant.hp,
+    maxHp: combatant.maxHp,
+  };
+}
+
+export function viewBattle(id: string, state: BattleState): BattleView {
+  return {
+    id,
+    turn: state.turn,
+    status: state.status,
+    player: {
+      ...viewCombatant(state.player),
+      moves: state.player.moves.map((move) => ({
+        id: move.id,
+        name: move.name,
+        power: move.power,
+      })),
+    },
+    enemy: viewCombatant(state.enemy),
+  };
+}
+
+/** What `POST /api/battles/:id/turn` answers with. */
+export interface TurnOutcome {
+  battle: BattleView;
+  events: BattleEvent[];
 }
