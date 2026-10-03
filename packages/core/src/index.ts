@@ -147,6 +147,42 @@ export function step(from: Position, dir: Direction, map: TileMap): Position {
   return canStandOn(map, to) ? to : from;
 }
 
+const DIRECTIONS: readonly Direction[] = ["up", "down", "left", "right"];
+
+/**
+ * Whether a player standing on `from` could walk to `to`: both can be stood
+ * on, and some chain of steps leads from the one to the other.
+ *
+ * The server asks this before it stores a position
+ * (docs/04-api-design.md). It does not ask how many steps the walk takes, or
+ * how long it took — only whether there is one. A row of trees with no gap in
+ * it is then a wall for a request as well, and not just for the arrow keys.
+ *
+ * Every step is taken with `step`, the function a player moves with, so "can
+ * walk there" cannot come to mean something walking does not do.
+ */
+export function canWalkTo(map: TileMap, from: Position, to: Position): boolean {
+  if (!canStandOn(map, from) || !canStandOn(map, to)) return false;
+
+  const indexOf = (at: Position) => at.y * map.width + at.x;
+  const goal = indexOf(to);
+
+  // A flood fill outwards from `from`. Each tile is visited once at most, and
+  // a map has a few hundred of them (MAP_LIMITS).
+  const reached = new Set([indexOf(from)]);
+  const frontier = [from];
+  for (let at = frontier.pop(); at !== undefined; at = frontier.pop()) {
+    if (indexOf(at) === goal) return true;
+    for (const dir of DIRECTIONS) {
+      const next = step(at, dir, map);
+      if (reached.has(indexOf(next))) continue;
+      reached.add(indexOf(next));
+      frontier.push(next);
+    }
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------------------
 // Randomness
 //

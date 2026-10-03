@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TILE_KINDS, canStandOn, isWalkable, step, tileAt } from "./index.js";
+import { TILE_KINDS, canStandOn, canWalkTo, isWalkable, step, tileAt } from "./index.js";
 import type { Direction, Position, TileKind, TileMap } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -193,5 +193,115 @@ describe("step", () => {
     }
     // Guards against the loop above silently testing nothing.
     expect(walks).toBeGreaterThan(100);
+  });
+});
+
+describe("canWalkTo", () => {
+  //        0123456
+  //      0 ..T...w        the left room: (0,0) (1,0) (0,1) (1,1) (0,2) (1,2)
+  //      1 ..T.g.w        the right room: everything between the trees and the water
+  //      2 ..T...w
+  const rooms = mapFromArt(["..T...w", "..T.g.w", "..T...w"]);
+  const left: Position = { x: 0, y: 0 };
+  const right: Position = { x: 4, y: 1 };
+
+  it("says yes for the tile the player is already on", () => {
+    expect(canWalkTo(rooms, left, { x: 0, y: 0 })).toBe(true);
+  });
+
+  it("says yes for a tile many steps away, when there is a way there", () => {
+    expect(canWalkTo(rooms, left, { x: 1, y: 2 })).toBe(true);
+    expect(canWalkTo(rooms, right, { x: 5, y: 2 })).toBe(true);
+  });
+
+  it("finds the way round an obstacle", () => {
+    const map = mapFromArt([".T.", ".T.", "..."]);
+    expect(canWalkTo(map, { x: 0, y: 0 }, { x: 2, y: 0 })).toBe(true);
+  });
+
+  it("says no for a tile on the far side of a wall with no gap in it", () => {
+    expect(canWalkTo(rooms, left, right)).toBe(false);
+    expect(canWalkTo(rooms, right, left)).toBe(false);
+  });
+
+  it("says yes again once the wall has a gap", () => {
+    const open = mapFromArt(["..T...w", "....g.w", "..T...w"]);
+    expect(canWalkTo(open, left, right)).toBe(true);
+  });
+
+  it.each([
+    ["a tree", { x: 2, y: 1 }],
+    ["water", { x: 6, y: 0 }],
+    ["somewhere off the map", { x: 7, y: 0 }],
+    ["somewhere between tiles", { x: 0.5, y: 0 }],
+  ])("says no for %s, which nobody can stand on", (_label, to) => {
+    expect(canWalkTo(rooms, left, to)).toBe(false);
+  });
+
+  it("says no from somewhere nobody can stand, even to the tile next to it", () => {
+    expect(canWalkTo(rooms, { x: 2, y: 0 }, { x: 1, y: 0 })).toBe(false);
+    expect(canWalkTo(rooms, { x: -1, y: 0 }, { x: 0, y: 0 })).toBe(false);
+  });
+
+  it("does not take tiles that only touch at a corner for a way through", () => {
+    const map = mapFromArt([".T", "T."]);
+    expect(canWalkTo(map, { x: 0, y: 0 }, { x: 1, y: 1 })).toBe(false);
+  });
+
+  it("does not wrap from the end of one row to the start of the next", () => {
+    // (1,0) and (0,1) sit side by side in the flat array, and nowhere near on the grid.
+    const map = mapFromArt(["T.", ".T"]);
+    expect(canWalkTo(map, { x: 1, y: 0 }, { x: 0, y: 1 })).toBe(false);
+  });
+
+  it("changes neither the positions nor the map it was given", () => {
+    const from = Object.freeze({ x: 0, y: 0 });
+    const to = Object.freeze({ x: 1, y: 2 });
+    const map: TileMap = Object.freeze({ ...rooms, tiles: Object.freeze([...rooms.tiles]) });
+    expect(canWalkTo(map, from, to)).toBe(true);
+  });
+
+  it("agrees, on any map, with rooms worked out a different way", () => {
+    const rand = mulberry32(0xc0ffee);
+    let yes = 0;
+    let no = 0;
+    for (let n = 0; n < 100; n++) {
+      const map = randomMap(rand);
+      const all: Position[] = [];
+      for (let y = 0; y < map.height; y++) for (let x = 0; x < map.width; x++) all.push({ x, y });
+
+      // Every standable tile starts as a room of its own; neighbours then keep
+      // taking the smaller of their two numbers until nothing changes. Tiles
+      // that end up with the same number are in the same room.
+      const room = all.map((at, i) => (canStandOn(map, at) ? i : -1));
+      for (let changed = true; changed;) {
+        changed = false;
+        for (const [i, at] of all.entries()) {
+          if (room[i] === -1) continue;
+          const beside = [
+            at.x + 1 < map.width ? i + 1 : -1,
+            at.y + 1 < map.height ? i + map.width : -1,
+          ];
+          for (const j of beside) {
+            const [a, b] = [room[i] ?? -1, room[j] ?? -1];
+            if (j === -1 || b === -1 || a === b) continue;
+            room[i] = room[j] = Math.min(a, b);
+            changed = true;
+          }
+        }
+      }
+
+      for (const [i, from] of all.entries()) {
+        for (const [j, to] of all.entries()) {
+          const same = room[i] !== -1 && room[i] === room[j];
+          expect(canWalkTo(map, from, to)).toBe(same);
+          if (same) yes++;
+          else no++;
+        }
+      }
+    }
+    // Guards against the loop above only ever seeing one of the two answers.
+    expect(yes).toBeGreaterThan(1000);
+    expect(no).toBeGreaterThan(1000);
   });
 });
