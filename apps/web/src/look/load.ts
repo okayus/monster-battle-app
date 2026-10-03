@@ -9,12 +9,11 @@
 
 import { err, ok } from "@mba/core";
 import type { Result } from "@mba/core";
-import { composeAppearance } from "@mba/sprite";
+import { composeAppearance, skinsNamedBy } from "@mba/sprite";
 import type { Appearance, RenderableSkin } from "@mba/sprite";
 
 import { fetchAppearance, fetchSkin } from "../api.js";
 import type { ApiError } from "../api.js";
-import { skinsNamedBy } from "./model.js";
 
 /**
  * The render-ready form of each of these skins, fetched side by side. One that

@@ -13,16 +13,6 @@
 import { PART_SLOTS, coloursOf } from "@mba/sprite";
 import type { Appearance, PaletteEntry, PartSlot, RenderableSkin } from "@mba/sprite";
 
-/** The skins a recipe names, each once: the worn one first, then the parts' in draw order. */
-export function skinsNamedBy(appearance: Appearance): string[] {
-  const ids = [appearance.skinId];
-  for (const slot of PART_SLOTS) {
-    const from = appearance.parts[slot];
-    if (from !== undefined && !ids.includes(from)) ids.push(from);
-  }
-  return ids;
-}
-
 /**
  * Wears a different skin. Parts taken from other skins stay as they are, and
  * so do the colours: "hair, in red" is about hair, not about one skin.

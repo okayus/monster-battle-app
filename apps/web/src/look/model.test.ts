@@ -3,16 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PART_SLOTS, parseAppearance } from "@mba/sprite";
 import type { Appearance, RenderableSkin } from "@mba/sprite";
 
-import {
-  colourWorn,
-  dye,
-  skinsNamedBy,
-  takePart,
-  trimmed,
-  undye,
-  wear,
-  withColour,
-} from "./model.js";
+import { colourWorn, dye, takePart, trimmed, undye, wear, withColour } from "./model.js";
 
 const PLAIN: Appearance = { skinId: "a", parts: {}, colours: [] };
 
@@ -21,21 +12,6 @@ function expectSendable(appearance: Appearance): void {
   const parsed = parseAppearance(JSON.parse(JSON.stringify(appearance)));
   expect(parsed).toEqual({ ok: true, value: appearance });
 }
-
-describe("skinsNamedBy", () => {
-  it("names the worn skin alone when nothing is swapped", () => {
-    expect(skinsNamedBy(PLAIN)).toEqual(["a"]);
-  });
-
-  it("names each skin once, however many slots are taken from it", () => {
-    const look: Appearance = {
-      skinId: "a",
-      parts: { hair: "b", shoes: "b", shirt: "c" },
-      colours: [],
-    };
-    expect(skinsNamedBy(look)).toEqual(["a", "c", "b"]);
-  });
-});
 
 describe("wear", () => {
   it("changes the skin that is worn", () => {

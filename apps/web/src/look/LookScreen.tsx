@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { WearableSkin } from "@mba/core";
-import { PART_SLOTS, coloursOf, composeAppearance } from "@mba/sprite";
+import { PART_SLOTS, coloursOf, composeAppearance, skinsNamedBy } from "@mba/sprite";
 import type { Appearance, RenderableSkin } from "@mba/sprite";
 
 import { fetchAppearance, fetchSkins, putAppearance } from "../api.js";
@@ -24,7 +24,7 @@ import { PART_NAMES } from "../editor/names.js";
 import { Playing } from "../Playing.js";
 import { hrefs } from "../route.js";
 import { fetchDrawings } from "./load.js";
-import { colourWorn, dye, skinsNamedBy, takePart, trimmed, undye, wear } from "./model.js";
+import { colourWorn, dye, takePart, trimmed, undye, wear } from "./model.js";
 
 type LoadState =
   | { kind: "loading" }
