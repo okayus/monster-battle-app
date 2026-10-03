@@ -13,6 +13,13 @@ import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   displayName: text("display_name").notNull(),
+  /**
+   * Whether this user may use the admin API. Who the user *is* and what they
+   * *may do* are separate questions: the first is answered per request (and
+   * will change when real authentication arrives), the second is a fact about
+   * the user, kept here.
+   */
+  isAdmin: integer("is_admin", { mode: "boolean" }).notNull().default(false),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 

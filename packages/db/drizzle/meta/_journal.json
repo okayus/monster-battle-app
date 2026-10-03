@@ -22,6 +22,13 @@
       "when": 1791005708707,
       "tag": "0002_monsters_and_battles",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791008104566,
+      "tag": "0003_admin_flag",
+      "breakpoints": true
     }
   ]
 }
