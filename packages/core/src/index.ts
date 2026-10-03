@@ -434,7 +434,7 @@ export interface TurnOutcome {
 // ---------------------------------------------------------------------------
 // Master data rules
 //
-// What the admin API asks before it stores a species or a map. The split is
+// What the admin API asks before it stores a move, a species or a map. The split is
 // the one docs/04-api-design.md draws: whether a field is a number at all is
 // a question of shape, answered by the API with a schema; whether that number
 // makes sense in the game is a rule, and the rules are here, where the admin
@@ -448,6 +448,32 @@ function isName(name: string, max: number): boolean {
 
 function isIntBetween(value: number, min: number, max: number): boolean {
   return Number.isInteger(value) && value >= min && value <= max;
+}
+
+export const MOVE_LIMITS = {
+  maxNameLength: 32,
+  /** Upper bound for a move's power. The lower bound is 1. */
+  maxPower: 999,
+} as const;
+
+/** What an admin submits for a move. */
+export interface MoveInput {
+  name: string;
+  power: number;
+}
+
+export type MoveError = { kind: "bad_name" } | { kind: "bad_power"; power: number };
+
+/** The rules a move has to satisfy. */
+export function checkMove(input: MoveInput): Result<MoveInput, MoveError> {
+  if (!isName(input.name, MOVE_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
+  // A power of zero is not a weak move. Every hit lands for at least 1
+  // (`calcDamage`), so it would be a move that does the same whoever uses it
+  // on whomever — a number that says nothing.
+  if (!isIntBetween(input.power, 1, MOVE_LIMITS.maxPower)) {
+    return err({ kind: "bad_power", power: input.power });
+  }
+  return ok(input);
 }
 
 export const SPECIES_LIMITS = {
@@ -576,6 +602,40 @@ export interface SkinSummary {
   /** Null for the skins that ship with the game. */
   ownerId: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Retiring
+//
+// Master data and skins are never deleted: saves, looks and owned monsters
+// refer to them (docs/03-data-model.md). What can be done instead is to
+// retire one — it stops being offered, and what already uses it keeps working
+// as far as it can. These are the shapes the admin API speaks in.
+// ---------------------------------------------------------------------------
+
+/** A move as the admin screens list it. */
+export interface AdminMove extends Move {
+  retired: boolean;
+}
+
+/** A species as the admin screens list it. */
+export interface AdminSpecies extends Species {
+  retired: boolean;
+}
+
+/** Something that stands in the way of retiring or restoring, named so an admin can go and fix it. */
+export interface MasterReference {
+  kind: "species" | "move" | "map" | "skin";
+  id: string;
+  name: string;
+}
+
+export type RetireError =
+  /** Master data that is still in use refers to it. `by` says which. */
+  | { kind: "in_use"; by: MasterReference[] }
+  /** It cannot come back while it refers to something that is retired. `on` says what. */
+  | { kind: "depends_on_retired"; on: MasterReference[] }
+  /** The game falls back to this one when something else is retired, so it has to stay. */
+  | { kind: "protected" };
 
 /**
  * A skin as a player's wardrobe lists it. Whose it is has been narrowed to the

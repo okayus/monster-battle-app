@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { MAP_LIMITS, SPECIES_LIMITS, checkMap, checkSpecies } from "./index.js";
+import {
+  MAP_LIMITS,
+  MOVE_LIMITS,
+  SPECIES_LIMITS,
+  calcDamage,
+  checkMap,
+  checkMove,
+  checkSpecies,
+} from "./index.js";
 import type { MapInput, SpeciesInput, TileKind } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +42,53 @@ function mapInput(overrides: Partial<MapInput> = {}): MapInput {
 }
 
 // ---------------------------------------------------------------------------
+
+describe("checkMove", () => {
+  it("accepts a move within the limits, and hands it back", () => {
+    const input = { name: "ぶつかる", power: 5 };
+    expect(checkMove(input)).toEqual({ ok: true, value: input });
+  });
+
+  it("accepts the limits themselves", () => {
+    expect(checkMove({ name: "あ".repeat(MOVE_LIMITS.maxNameLength), power: 1 }).ok).toBe(true);
+    expect(checkMove({ name: "あ", power: MOVE_LIMITS.maxPower }).ok).toBe(true);
+  });
+
+  it.each([
+    ["empty", ""],
+    ["only spaces", "   "],
+    ["too long", "あ".repeat(MOVE_LIMITS.maxNameLength + 1)],
+  ])("refuses a name that is %s", (_label, name) => {
+    expect(checkMove({ name, power: 5 })).toEqual({ ok: false, error: { kind: "bad_name" } });
+  });
+
+  it.each([
+    ["zero", 0],
+    ["negative", -3],
+    ["over the limit", MOVE_LIMITS.maxPower + 1],
+    ["a fraction", 2.5],
+    ["not a number", Number.NaN],
+  ])("refuses a power that is %s", (_label, power) => {
+    expect(checkMove({ name: "ぶつかる", power })).toEqual({
+      ok: false,
+      error: { kind: "bad_power", power },
+    });
+  });
+
+  it("draws the lower limit where a move still means something", () => {
+    // What the rule is protecting: at power 0 the stats stop mattering, because
+    // every hit is rounded up to 1.
+    const weak = { attack: 1 };
+    const strong = { attack: 999 };
+    const target = { defense: 1 };
+    expect(calcDamage(strong, target, { power: 0 }, 1)).toBe(
+      calcDamage(weak, target, { power: 0 }, 1),
+    );
+    expect(calcDamage(strong, target, { power: 1 }, 1)).toBeGreaterThan(
+      calcDamage(weak, target, { power: 1 }, 1),
+    );
+  });
+});
 
 describe("checkSpecies", () => {
   it("accepts a species within every limit, and hands it back", () => {
