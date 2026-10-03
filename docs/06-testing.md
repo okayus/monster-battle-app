@@ -32,8 +32,8 @@ dev コンテナで同じ検査を回すのとの違いは、**まっさらな�
 
 | 段 | 道具 | 相手 | 件数 |
 |---|---|---|---|
-| 単体・API | Vitest | 純粋関数と、インメモリの SQLite を渡した API（`app.request()`） | 538 |
-| 画面 | Playwright と Chromium | 本番イメージのコンテナ | 44 |
+| 単体・API | Vitest | 純粋関数と、インメモリの SQLite を渡した API（`app.request()`） | 621 |
+| 画面 | Playwright と Chromium | 本番イメージのコンテナ | 51 |
 
 **規則は下の段で、組み立ては上の段で確かめる。** ダメージの式、スキンの検証、マップの規則は、単体テストが決め打ちの入力で
 隅まで見ている。画面のテストはそれをやり直さない。見るのは部品がつながっていること——ボタンを押すとリクエストが飛び、
@@ -105,6 +105,11 @@ lockfile を持つ。Docker のビルドコンテキストも別（アプリ側�
   画面が追いつく前の値を読むことがある
 - **作るものの名前は実行ごとに変える。** 管理画面のテストは種族とマップを作る。空の DB が相手なら要らないが、
   同じサーバに何度走らせても通るようにしてある（下の「1 本だけ走らせる」）
+- **最初から入っているものを壊さない。** DB は全部のテストで 1 つ。retire のテストは、自分で作った技・種族・マップ・スキンだけを
+  外す。最初から入っている種族を外すと、あとから走るバトルのテストに出てこなくなる
+- **一覧の並びを当てにしない。** 「先頭にあるはず」ではなく、名前で選ぶ。ほかのテストが一覧に足すので、
+  何が先頭に来るかは、どのテストが先に走ったかで変わる。空の DB からの 1 回目では通ってしまうので、
+  同じサーバに続けて走らせて確かめる
 - **ページが投げた例外は、テストの失敗にする**（`failOnPageErrors()`）。画面が見かけ上動いていても、誰も受けなかった例外は不具合
 
 ## 書いたテストは、壊して確かめる
@@ -144,6 +149,18 @@ lockfile を持つ。Docker のビルドコンテキストも別（アプリ側�
 | パレットにある色を全部、色の欄に出す | `offers the colours the look is painted with, and no others` ほか 2 本 |
 | サーバに断られても、何も出さない | `says so when the server refuses, and the look stays as it was` |
 | レシピを保存せずに 200 を返す | `wears the skin chosen on the dressing screen, on the map and after a reload` ほか 5 本 |
+| 断られても、retire の操作が何も出さない | `will not retire a move a species still knows, and does once the species gives it up` ほか 3 本 |
+| retire できた後、一覧を取り直さない | 同上 ほか 3 本 |
+| 断った理由から、誰が使っているかを抜く | 同上 ほか 2 本 |
+| フォームが、retire 済みのものも選択肢に出す | 同上 ほか 1 本 |
+| 一覧で、retire 済みに印を付けない | 同上 ほか 2 本 |
+| 技の保存が、いつも新しく作る | `creates a move, changes it, and offers it to species` |
+| きがえの一覧が、外したスキンを出し続ける | `takes a retired skin out of the wardrobe and off whoever wears it, and gives the look back` |
+| 外したスキンを着た見た目を、そのまま返す | 同上 |
+| プレイヤーの側から、外したマップが見え続ける | `sends a player on a retired map back to the start, and puts them back when it returns` |
+| 種族が覚えている技でも外せる | `will not retire a move a species still knows, and does once the species gives it up` |
+| retire 済みの技を覚えた種族でも戻せる | `says what has to come back first when a species still knows a retired move` |
+| 最初のマップと既定のスキンも外せる | `will not retire what everything else falls back to` ほか 1 本 |
 
 `check` の方も同じように確かめてある。型エラー、lint 違反、整形されていない行、成り立たなくなった単体テストは、
 それぞれ自分の `RUN` で落ちる。

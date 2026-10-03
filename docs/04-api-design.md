@@ -40,10 +40,13 @@
 | PUT | `/api/admin/species/:id` | モンスター種族の置き換え |
 | GET / POST | `/api/admin/maps` | マップの一覧 / 追加 |
 | PUT | `/api/admin/maps/:id` | マップの置き換え（出現するモンスターを含む） |
-| GET | `/api/admin/moves` | 技の一覧（追加・更新は未実装） |
-| GET | `/api/admin/skins` | スキンの一覧（種族の見た目を選ぶため。絵は含まない） |
+| GET / POST | `/api/admin/moves` | 技の一覧 / 追加 |
+| PUT | `/api/admin/moves/:id` | 技の置き換え |
+| GET | `/api/admin/skins` | スキンの一覧（絵は含まない） |
+| PUT | `/api/admin/{species\|moves\|maps\|skins}/:id/retired` | retire する / 戻す（`{ "retired": true }`） |
 
-削除は用意しない。retire（docs/03）で提示から外す。retire 自体はまだ実装していない。
+削除は用意しない。retire で提示から外す（[docs/03](03-data-model.md) §削除しない）。管理 API の一覧は、
+retire 済みのものも `retired: true` を付けて返す。
 
 ## 認証と認可
 
@@ -229,6 +232,24 @@ Hono インスタンスの中にあり、その先頭に `requireAdmin` があ�
 一覧は全員に同じものが返るが、ほかのユーザーの id は応答に入らない。画面が自分の id を知っている必要も無くなるので、
 `/api/me` を作らずに済んでいる。管理 API の一覧（`/api/admin/skins`）は `ownerId` をそのまま返す。
 
+**技は、検査が 2 段で済む。** 形（zod）と規則（`@mba/core` の `checkMove()`）。技は何も指さないので、
+参照先を確かめる 3 段目が無い。威力を変えても、進行中のバトルには届かない（種族の編集と同じ理由）。
+
+**外す・戻すは、状態を `PUT` する。** `PUT …/retired` に `{ "retired": true }`。`/retire` と `/restore` のような
+動詞のルートにしなかったのは、ボディが「どうなっているべきか」を言う形だと、同じ要求を何度送っても同じになり、
+戻すのが同じ要求の値違いで済むため。すでにその状態なら何も変えずに 200 を返す（retire した時刻も動かさない）。
+`DELETE` にもしなかった。消していないので。
+
+**4 種類とも同じルートの形で、規則は 1 つのファイルにある**（`retirement.ts`）。何が外せて何が外せないかは
+[docs/03](03-data-model.md) §削除しない。ハンドラは、そこが返した値を HTTP に翻訳するだけ。
+
+**編集と retire は別の要求。** `PUT /api/admin/moves/:id` で名前や威力を置き換えても、retire の状態は変わらない。
+フォームの保存が、外したものをうっかり戻すことが無い。
+
+**「無い」と「外されている」は、管理 API では別の `kind`**（`unknown_move` と `retired_move`）。
+管理者にとっては、直し方が違う（作るのか、戻すのか）。ゲーム API は区別しない。外されたスキンをレシピに書くと
+`unknown_skin` が返る。プレイヤーから見れば、外されたものは無いのと同じ。
+
 ### エラーの一覧（スキン）
 
 | ステータス | `kind` | いつ |
@@ -246,7 +267,7 @@ Hono インスタンスの中にあり、その先頭に `requireAdmin` があ�
 | 400 | `malformed` | 形が違う（`at` にその場所。規格に無いスロットも含む） |
 | 400 | `bad_palette_id` / `bad_hex` | 色の id・色がパターンに合わない（docs/02） |
 | 400 | `duplicate_palette_id` / `too_many` | 同じ id が 2 回ある / 色が多すぎる |
-| 400 | `unknown_skin` | 着るスキン、またはパーツの元のスキンが無い（`skinId` にどれか） |
+| 400 | `unknown_skin` | 着るスキン、またはパーツの元のスキンが無い、または retire されている（`skinId` にどれか） |
 | 400 | `unknown_colour` | その見た目のどこにも使われていない色の id（`id` にどれか） |
 | 413 | `body_too_large` | ボディが上限を超えた |
 
@@ -256,7 +277,7 @@ Hono インスタンスの中にあり、その先頭に `requireAdmin` があ�
 |---|---|---|
 | 400 | `bad_json` | ボディが JSON でない |
 | 400 | `malformed` | 形が違う（`at` にその場所。例: `$.position.x`） |
-| 400 | `unknown_map` | `mapId` のマップが無い |
+| 400 | `unknown_map` | `mapId` のマップが無い、または retire されている |
 | 400 | `cannot_stand` | マップの外、または歩けないタイル |
 | 404 | `not_found` | `GET /api/maps/:id` でその id のマップが無い |
 | 413 | `body_too_large` | ボディが上限を超えた |
@@ -281,10 +302,15 @@ Hono インスタンスの中にあり、その先頭に `requireAdmin` があ�
 | 400 | `bad_json` / `malformed` | ボディが JSON でない / 形が違う（タイルの名前でないものも含む） |
 | 400 | `bad_name` | 名前が空、または長すぎる |
 | 400 | `bad_stat` | 最大 HP・攻撃・防御が 1〜999 の整数でない（`stat` にどれか） |
+| 400 | `bad_power` | 技の威力が 1〜999 の整数でない |
 | 400 | `bad_move_count` / `duplicate_move` | 技が 1〜4 個でない / 同じ技が 2 回ある |
 | 400 | `unknown_skin` / `unknown_move` / `unknown_species` | 参照先が存在しない |
+| 400 | `retired_skin` / `retired_move` / `retired_species` | 参照先が retire されている |
+| 400 | `in_use` | retire しようとしたものを、生きているマスターが使っている（`by` に誰が） |
+| 400 | `depends_on_retired` | 戻そうとしたものが、retire 済みのものを指している（`on` に何を） |
+| 400 | `protected` | 最初のマップ、または既定のスキンを retire しようとした |
 | 400 | `bad_size` / `bad_tile_count` | 幅・高さが 1〜32 の整数でない / タイルの数が幅×高さと合わない |
 | 400 | `bad_spawn` | 開始位置がマップの外、または歩けないタイル |
 | 400 | `bad_weight` / `duplicate_encounter` | 重みが 1〜100 の整数でない / 同じ種族が 2 回ある |
-| 404 | `not_found` | PUT の id が存在しない |
+| 404 | `not_found` | PUT の id が存在しない（置き換えも、retire も） |
 | 413 | `body_too_large` | ボディが上限を超えた |
