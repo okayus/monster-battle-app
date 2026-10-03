@@ -102,5 +102,9 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 ## 現在の状態
 
-**環境構築とドキュメントのみ。** 機能は未実装で、動くのは疎通確認（`/api/health` と、それを叩く各 SPA の骨組み）まで。
-`packages/*` には型・規格・定数だけが入っていて、関数は未実装であることが分かる形にしてある。
+**Step 1（スキンの形式）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
+
+- `@mba/sprite` … `parseSkin()`（検証）と `toRenderable()`（矩形結合）を実装済み。単体テストあり
+- `@mba/sprite-react` … `<Sprite>` が手書きのサンプルスキンを描けることをテストで確認済み
+- それ以外 … 疎通確認（`/api/health` と、それを叩く各 SPA の骨組み）まで。スキンはまだ保存できず、
+  `@mba/core` の関数は未実装であることが分かる形にしてある
