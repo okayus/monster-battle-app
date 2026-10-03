@@ -6,36 +6,32 @@
  *   settings — account / preferences, and the entry point to the skin editor
  *   editor   — the dot-art editor that produces a skin
  *
- * So far only the first vertical slice is wired up: a minimal editor that
- * saves a skin, and a view that draws it back from the API. See
- * docs/05-roadmap.md for the order the rest gets built in.
+ * Two slices are wired up so far: the map you can walk on, and a minimal skin
+ * editor. See docs/05-roadmap.md for the order the rest gets built in.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
+import { MapScreen } from "./MapScreen.js";
+import { hrefs, parseRoute } from "./route.js";
+import type { Route } from "./route.js";
 import { SavedSkin } from "./SavedSkin.js";
 import { SkinEditor } from "./SkinEditor.js";
-
-/**
- * Which saved skin to show lives in the URL (`#/skins/<id>`), not in React
- * state. Saving a skin simply navigates to its address, and that address shows
- * the same skin after a reload — which is the evidence that it came back out
- * of the database and not out of memory.
- *
- * The pattern only admits the characters an id is made of, so whatever else
- * someone types into the address bar never reaches a request.
- */
-const SKIN_HASH = /^#\/skins\/([0-9a-f-]{1,64})$/;
 
 function subscribeToHash(onChange: () => void): () => void {
   window.addEventListener("hashchange", onChange);
   return () => window.removeEventListener("hashchange", onChange);
 }
 
-function useSkinIdFromHash(): string | null {
+/**
+ * The current screen, read from the URL (see route.ts). Subscribing to the
+ * hash rather than copying it into state means the address bar and the screen
+ * cannot disagree.
+ */
+function useRoute(): Route {
   const hash = useSyncExternalStore(subscribeToHash, () => window.location.hash);
-  return SKIN_HASH.exec(hash)?.[1] ?? null;
+  return parseRoute(hash);
 }
 
 const page: CSSProperties = {
@@ -44,11 +40,13 @@ const page: CSSProperties = {
   lineHeight: 1.8,
 };
 
+const nav: CSSProperties = { display: "flex", gap: "1.5rem" };
+
 const columns: CSSProperties = { display: "flex", gap: "3rem", flexWrap: "wrap" };
 
 export function App() {
   const [health, setHealth] = useState<string>("...");
-  const skinId = useSkinIdFromHash();
+  const route = useRoute();
 
   useEffect(() => {
     // Proves the Vite dev server's /api proxy reaches the Hono process.
@@ -61,17 +59,33 @@ export function App() {
   return (
     <main style={page}>
       <h1>Monster Battle</h1>
+      <nav style={nav} aria-label="画面">
+        <a href={hrefs.map} aria-current={route.screen === "map" ? "page" : undefined}>
+          マップ
+        </a>
+        <a href={hrefs.editor} aria-current={route.screen === "editor" ? "page" : undefined}>
+          スキンエディタ
+        </a>
+      </nav>
       <p>
         API 疎通: <strong>{health}</strong>
       </p>
-      <div style={columns}>
-        <SkinEditor
-          onSaved={(id) => {
-            window.location.hash = `#/skins/${id}`;
-          }}
-        />
-        {skinId !== null && <SavedSkin key={skinId} id={skinId} />}
-      </div>
+
+      {route.screen === "map" && <MapScreen />}
+
+      {route.screen === "editor" && (
+        <div style={columns}>
+          <SkinEditor
+            onSaved={(id) => {
+              // Saving a skin navigates to its address. That address shows the
+              // same skin after a reload, which is the evidence that it came
+              // back out of the database and not out of memory.
+              window.location.hash = hrefs.skin(id);
+            }}
+          />
+          {route.skinId !== null && <SavedSkin key={route.skinId} id={route.skinId} />}
+        </div>
+      )}
     </main>
   );
 }

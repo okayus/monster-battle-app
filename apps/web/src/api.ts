@@ -11,8 +11,9 @@
  * so there is no base URL to configure and no CORS (docs/01-architecture.md).
  */
 
-import { err, ok } from "@mba/sprite";
-import type { RenderableSkin, Result, Skin } from "@mba/sprite";
+import { err, ok } from "@mba/core";
+import type { GameMap, Result, SaveData } from "@mba/core";
+import type { RenderableSkin, Skin } from "@mba/sprite";
 
 /**
  * Why a call failed. `kind` is the API's own machine-readable `error.kind`
@@ -72,4 +73,24 @@ export function fetchSkin(id: string): Promise<Result<RenderableSkin, ApiError>>
   // The id can come from the address bar, so it is escaped rather than assumed
   // to be a single path segment.
   return request(`/api/skins/${encodeURIComponent(id)}`);
+}
+
+/** Where the player is. The server answers with the starting point if nothing was ever saved. */
+export function fetchSave(): Promise<Result<SaveData, ApiError>> {
+  return request("/api/save");
+}
+
+/** Stores where the player is. The server refuses anywhere a player cannot stand. */
+export function putSave(save: SaveData): Promise<Result<SaveData, ApiError>> {
+  return request("/api/save", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(save),
+    // Lets the request finish even if the page is closed right after the last step.
+    keepalive: true,
+  });
+}
+
+export function fetchMap(id: string): Promise<Result<GameMap, ApiError>> {
+  return request(`/api/maps/${encodeURIComponent(id)}`);
 }
