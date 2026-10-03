@@ -102,22 +102,23 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 ## 現在の状態
 
-**Step 5（管理画面）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
+**Step 6（エディタを道具として仕上げる）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
+残っているのは Step 7（本番相当の 1 コンテナでの確認）だけ。
 
 プレイヤー側の縦の串が 3 本と、それらが読むマスターデータを書く管理画面がある。
 
 ```
-エディタ（最小） → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示
+エディタ → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示（開き直すときは /source）
 マップ画面 → step() で移動 → PUT /api/save → SQLite → GET /api/save → 同じ位置から再開
 草むらで調べる → POST /api/battles → 技を選ぶ → POST /api/battles/:id/turn → 勝敗はサーバが決める
 管理画面 → PUT /api/admin/species/:id・/api/admin/maps/:id → 次のバトル・次に開いたマップから反映
 ```
 
 - `@mba/core` … 移動（`step()`）、バトル（`calcDamage()`・`playTurn()`）、マスターデータの規則（`checkSpecies()`・`checkMap()`）
-- `@mba/sprite` … `parseSkin()`（検証）と `toRenderable()`（矩形結合）
-- `@mba/sprite-react` … `<Sprite>`。プレイヤーのスキンもモンスターも、管理画面のプレビューも同じコンポーネントで描く
+- `@mba/sprite` … `parseSkin()`（検証）、`toRenderable()`（矩形結合）、`frameAt()`（その時刻のコマ）
+- `@mba/sprite-react` … `<Sprite>`。プレイヤーのスキンもモンスターも、管理画面のプレビューも同じコンポーネントで描く。時間を渡すとコマが進む
 - `@mba/db` … 10 テーブル。未定義なのは見た目のレシピ（`appearances`）だけ
 - `@mba/api` … ゲーム API（スキン、マップ、セーブ、バトル）と管理 API（種族、マップ）。インメモリの SQLite と決め打ちの乱数でテストしている
-- `@mba/web` … マップ画面、バトル画面、最小のスキンエディタ
+- `@mba/web` … マップ画面、バトル画面、スキンエディタ（パーツごとに描く・色を足す／作り直す・コマと再生・着せ替えプレビュー）
 - `@mba/admin` … 種族の一覧とフォーム、マップの一覧とタイルを塗るエディタ
-- まだ無いもの … 技の編集、retire、マップ間の移動、成長（レベルや HP の持ち越し）、見た目のレシピ
+- まだ無いもの … エディタの undo、技の編集、retire、マップ間の移動、成長（レベルや HP の持ち越し）、見た目のレシピ
