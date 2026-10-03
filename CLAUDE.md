@@ -48,6 +48,9 @@ docker compose exec dev pnpm typecheck     # 型
 docker compose exec dev pnpm lint          # oxlint
 docker compose exec dev pnpm test          # vitest
 docker compose exec dev pnpm --filter @mba/db run db:generate --name <名前>   # スキーマ変更後
+
+docker build --target check .                                             # CI と同じ検査（型・lint・整形・単体テスト）
+docker compose -f docker-compose.e2e.yml up --build --exit-code-from e2e  # 本番イメージに対する画面のテスト
 ```
 
 - **依存の追加も実行もコンテナ内で行う。** ホストで `pnpm install` しない。
@@ -55,6 +58,10 @@ docker compose exec dev pnpm --filter @mba/db run db:generate --name <名前>   
 - SQLite は名前付きボリューム。`docker compose down -v` でだけ消える。
 - マイグレーションは `--name` を必ず付けて生成する（省くとランダムな名前に固有名詞が混ざる）。
   適用は API の起動時だけなので、生成後は `docker compose restart dev`。詳細は docs/03 §マイグレーション。
+- **下の 2 つが CI そのもの。** 書いている最中は上の `exec dev` で回し、区切りで下の 2 つを通す。dev コンテナは動かしたままでよい。
+- **画面の流れを足したら、`e2e/tests/` にテストを足す。** 足したら、守っているはずのコードを壊して落ちることを見る。
+  通るテストが何かを守っているとは限らない（docs/06 §書いたテストは、壊して確かめる）。
+- `e2e/` はワークスペースの外で、自分の lockfile を持つ。テストの整形と依存の変え方は docs/06 §日々の操作。
 
 ## 迷ったときの判断基準
 

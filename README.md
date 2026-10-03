@@ -33,6 +33,8 @@ apps/admin             @mba/admin         管理画面 SPA（React + Vite）
 
 ビルド・テスト・lint・整形はすべて [vite-plus](https://viteplus.dev)（`vp`）経由。
 
+これとは別に、`e2e/` に画面のテスト（Playwright）がある。ワークスペースの外に置いてあり、依存も Docker のイメージも別。
+
 ## 開発（Docker）
 
 ```sh
@@ -83,6 +85,21 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 - データは名前付きボリューム `mba-data` に入る。開発用の DB（`sqlite-data`）とは別物で、最初は空から始まる
 - Ctrl+C でも `docker stop` でもすぐに止まる。プロセスが自分でシグナルを受けて、DB を閉じてから終了する
 
+## テストと CI
+
+```sh
+docker build --target check .                                             # 型・lint・整形・単体テスト
+docker compose -f docker-compose.e2e.yml up --build --exit-code-from e2e  # 本番イメージを立てて、ブラウザで操作する
+docker compose -f docker-compose.e2e.yml down                             # 後片付け
+```
+
+GitHub Actions が main への push と pull request のたびに走らせるのも、上の 2 つ。ワークフローに独自の手順は無いので、
+CI で落ちたものは同じコマンドで手元でも落ちる。
+
+- どちらも開発用のコンテナを動かしたまま実行できる（ポートを公開せず、開発用の DB にも触れない）
+- 画面のテストの相手は、開発サーバではなく**本番イメージのコンテナ**。開発サーバで通ることは、配るものが動くことを意味しないため
+- 組み立て、テストを書くときの決まり、落ちたときの調べ方は [docs/06-testing.md](docs/06-testing.md)
+
 ## コマンド
 
 | コマンド | 内容 |
@@ -104,12 +121,14 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 | [03-data-model.md](docs/03-data-model.md) | DB が持つもの／持たないもの。見た目は「合成のレシピ」 |
 | [04-api-design.md](docs/04-api-design.md) | ゲーム API と管理 API の分離・認証と認可の置き場所 |
 | [05-roadmap.md](docs/05-roadmap.md) | 実装の順序 |
+| [06-testing.md](docs/06-testing.md) | テストの 2 段・なぜ画面のテストの相手が本番イメージか・CI |
 
 ## 現在の状態
 
-**ロードマップの Step 0〜7 をすべて終えた。** 各 Step で決めたこと・やらなかったことは [docs/05-roadmap.md](docs/05-roadmap.md) にある。
+**ロードマップの Step 0〜8 を終えた。** 各 Step で決めたこと・やらなかったことは [docs/05-roadmap.md](docs/05-roadmap.md) にある。
 
 プレイヤー側の縦の串が 3 本と、それらが読むマスターデータを書く管理画面があり、全体が 1 コンテナ・1 ポートでも動く。
+その全部を、本番イメージを相手にした画面のテストが確かめている。
 
 ```
 エディタ → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示（開き直すときは /source）
@@ -125,4 +144,6 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 - `@mba/api` … ゲーム API（スキン、マップ、セーブ、バトル）と管理 API（種族、マップ）。インメモリの SQLite と決め打ちの乱数でテストしている
 - `@mba/web` … マップ画面、バトル画面、スキンエディタ（パーツごとに描く・色を足す／作り直す・コマと再生・着せ替えプレビュー）
 - `@mba/admin` … 種族の一覧とフォーム、マップの一覧とタイルを塗るエディタ
-- ロードマップの外に残っているもの … エディタの undo、技の編集、retire、マップ間の移動、成長（レベルや HP の持ち越し）、見た目のレシピ
+- `e2e/` … 画面のテスト 34 本。マップ、バトル、エディタ、管理画面と、1 ポートでの配信
+- この先（Step 9〜12） … 見た目のレシピ、retire と技の編集、マップ間の移動、成長と報酬。
+  ロードマップに入れていないのは、本物の認証、本番イメージの軽量化、エディタの undo と描きかけの保存
