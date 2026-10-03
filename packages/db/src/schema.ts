@@ -99,6 +99,32 @@ export const saves = sqliteTable("saves", {
 export type SaveRow = typeof saves.$inferSelect;
 export type NewSaveRow = typeof saves.$inferInsert;
 
+/**
+ * What each player looks like — as a recipe, never as a picture
+ * (docs/03-data-model.md): which skin is worn, which slots are taken from
+ * another skin, and which colours are worn in place of the drawn ones.
+ *
+ * One row per user, like `saves`. `skinId` is a real reference. The two
+ * override columns are JSON text whose shape this package does not know, as
+ * with skins: the API validates a recipe (`parseAppearance`), and checks that
+ * what it names exists, before it gets here.
+ */
+export const appearances = sqliteTable("appearances", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id),
+  skinId: text("skin_id")
+    .notNull()
+    .references(() => skins.id),
+  /** JSON object: slot → the id of the skin that slot is taken from. */
+  partOverrides: text("part_overrides").notNull(),
+  /** JSON array of `{ id, hex }`: the colours worn instead of the drawn ones. */
+  colourOverrides: text("colour_overrides").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export type AppearanceRow = typeof appearances.$inferSelect;
+
 // ---------------------------------------------------------------------------
 // Monsters — master data, to be edited from the admin screen
 // ---------------------------------------------------------------------------
