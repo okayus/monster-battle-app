@@ -8,13 +8,13 @@
  * input they gave it.
  */
 
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 
 import type { SkinSummary } from "@mba/core";
 import { skins } from "@mba/db";
 import type { Db, NewSkinRow } from "@mba/db";
 import { toRenderable } from "@mba/sprite";
-import type { Skin } from "@mba/sprite";
+import type { RenderableSkin, Skin } from "@mba/sprite";
 
 export function skinRow(id: string, ownerId: string | null, skin: Skin, now: Date): NewSkinRow {
   return {
@@ -44,4 +44,26 @@ export function listSkins(db: Db): SkinSummary[] {
 
 export function skinExists(db: Db, id: string): boolean {
   return db.select({ id: skins.id }).from(skins).where(eq(skins.id, id)).get() !== undefined;
+}
+
+/**
+ * The render-ready form of each of these skins, by id. An id that is missing
+ * from the answer is a skin that does not exist.
+ *
+ * The stored text is parsed here, which the read path for a single skin never
+ * does (it streams the text out as it is). This is for the write path, where a
+ * recipe has to be checked against the skins it names.
+ */
+export function renderablesOf(db: Db, ids: readonly string[]): Map<string, RenderableSkin> {
+  const found = new Map<string, RenderableSkin>();
+  if (ids.length === 0) return found;
+  const rows = db
+    .select({ id: skins.id, renderable: skins.renderable })
+    .from(skins)
+    .where(inArray(skins.id, [...ids]))
+    .all();
+  // A cast, not a check: this text was produced by `toRenderable` when the
+  // skin was stored.
+  for (const row of rows) found.set(row.id, JSON.parse(row.renderable) as RenderableSkin);
+  return found;
 }

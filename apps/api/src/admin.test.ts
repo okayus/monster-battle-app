@@ -492,7 +492,9 @@ describe("what the forms choose from", () => {
     const { app } = setup();
     const listed = (await (await send(app, "GET", "/skins")).json()) as SkinSummary[];
 
+    // What ships with the game: the skin a new player wears, and one per species.
     expect(listed.map((skin) => skin.id).sort()).toEqual([
+      "player-default",
       "species-drop",
       "species-moss",
       "species-rock",

@@ -1,6 +1,7 @@
 /**
  * What a brand-new database needs before the game can be played: the local
- * user, a map to stand on, monsters to meet, and one monster to start with.
+ * user, a map to stand on, something to wear, monsters to meet, and one
+ * monster to start with.
  *
  * All of this is master data that the admin screen will own (Step 5 in
  * docs/05-roadmap.md). Until then there is no other way to create it, so it is
@@ -14,9 +15,10 @@ import { err, ok } from "@mba/core";
 import type { Result } from "@mba/core";
 import { mapEncounters, moves, ownedMonsters, skins, species, speciesMoves } from "@mba/db";
 import type { Db } from "@mba/db";
-import { CELLS_PER_FRAME, PART_SLOTS, packFrame, parseSkin } from "@mba/sprite";
-import type { PaletteEntry, Skin, SkinError } from "@mba/sprite";
+import { CELLS_PER_FRAME, PART_SLOTS, SKIN_SPEC, packFrame, parseSkin } from "@mba/sprite";
+import type { PaletteEntry, PartSlot, Skin, SkinError } from "@mba/sprite";
 
+import { DEFAULT_SKIN_ID } from "./appearance.js";
 import { LOCAL_USER_ID, ensureLocalUser } from "./auth.js";
 import { START_MAP_ID, ensureStarterMap } from "./maps.js";
 import type { MapArtError } from "./maps.js";
@@ -24,6 +26,7 @@ import { skinRow } from "./skins.js";
 
 export type SeedError =
   | MapArtError
+  | { kind: "bad_player_skin"; error: SkinError }
   | { kind: "bad_monster_skin"; species: string; error: SkinError };
 
 const MOVES = [
@@ -151,8 +154,13 @@ const SPECIES: SpeciesSeed[] = [
 /** The monster a new player is given. */
 const STARTER_SPECIES_ID = "moss";
 
-/** A monster has one pose, so the duration never shows. Any valid value will do. */
+/** These drawings have one pose, so the duration never shows. Any valid value will do. */
 const FRAME_MS = 120;
+
+/** Rows of a drawing as cells. `.` is transparent, a digit n is `palette[n - 1]`. */
+function cellsOf(rows: readonly string[]): number[] {
+  return rows.flatMap((row) => [...row].map((char) => (char === "." ? 0 : Number(char))));
+}
 
 /**
  * Turns a drawing into a Skin by the same route a player's drawing takes:
@@ -162,7 +170,7 @@ const FRAME_MS = 120;
  * to exactly the rules a player's are.
  */
 function monsterSkin(kind: SpeciesSeed): Result<Skin, SkinError> {
-  const grid = kind.art.flatMap((row) => [...row].map((char) => (char === "." ? 0 : Number(char))));
+  const grid = cellsOf(kind.art);
   const blank = packFrame(new Array<number>(CELLS_PER_FRAME).fill(0), FRAME_MS);
   return parseSkin({
     formatVersion: 1,
@@ -180,6 +188,105 @@ function monsterSkin(kind: SpeciesSeed): Result<Skin, SkinError> {
 function skinIdOf(speciesId: string): string {
   return `species-${speciesId}`;
 }
+
+// ---------------------------------------------------------------------------
+// What a new player wears
+// ---------------------------------------------------------------------------
+
+/**
+ * The ids are roles, and they are the ones the editor starts a new skin with
+ * (`skin`, `hair`, `shirt`, `pants`). A colour chosen for "hair" then means
+ * the same thing on this skin and on one a player drew.
+ */
+const PLAYER_PALETTE: PaletteEntry[] = [
+  { id: "skin", hex: "#e8b98a" },
+  { id: "hair", hex: "#5a3921" },
+  { id: "shirt", hex: "#3f7bd6" },
+  { id: "pants", hex: "#2f3a56" },
+  { id: "shoes", hex: "#7a4a2a" },
+  { id: "eye", hex: "#222222" },
+];
+
+/**
+ * One drawing per part, each on the whole canvas: `top` is the row the first
+ * line of `rows` sits on, and everything above and below is transparent.
+ *
+ * The body is drawn in full, under the clothes. A part can be swapped for
+ * another skin's (docs/03-data-model.md), and whatever the other skin leaves
+ * uncovered has to be there.
+ */
+const PLAYER_ART: Record<PartSlot, { top: number; rows: string[] }> = {
+  body: {
+    top: 3,
+    rows: [
+      ".....111111.....",
+      ".....111111.....",
+      ".....161161.....",
+      ".....111111.....",
+      ".......11.......",
+      "....11111111....",
+      "...1111111111...",
+      "...1111111111...",
+      "...1.111111.1...",
+      ".....111111.....",
+      ".....11..11.....",
+      ".....11..11.....",
+      "....111..111....",
+    ],
+  },
+  shirt: {
+    top: 8,
+    rows: ["....33333333....", "...3333333333...", "...3333333333...", ".....333333....."],
+  },
+  pants: {
+    top: 12,
+    rows: [".....444444.....", ".....44..44.....", ".....44..44....."],
+  },
+  shoes: {
+    top: 15,
+    rows: ["....555..555...."],
+  },
+  hair: {
+    top: 1,
+    rows: [".....222222.....", "....22222222....", "....22....22....", "....2......2...."],
+  },
+};
+
+/** Through `parseSkin`, like every other skin: see `monsterSkin`. */
+function playerSkin(): Result<Skin, SkinError> {
+  const size = SKIN_SPEC.canvasSize;
+  return parseSkin({
+    formatVersion: 1,
+    name: "はじめのすがた",
+    palette: PLAYER_PALETTE,
+    parts: PART_SLOTS.map((slot) => {
+      const { top, rows } = PLAYER_ART[slot];
+      const grid = [
+        ...new Array<number>(top * size).fill(0),
+        ...cellsOf(rows),
+        ...new Array<number>((size - top - rows.length) * size).fill(0),
+      ];
+      return { slot, frames: [packFrame(grid, FRAME_MS)] };
+    }),
+  });
+}
+
+/**
+ * Makes sure the skin a new player wears exists. Like the starter map, it is
+ * put in if it is missing and never overwritten.
+ */
+function ensureDefaultSkin(db: Db, now: Date): Result<void, SeedError> {
+  const skin = playerSkin();
+  if (!skin.ok) return err({ kind: "bad_player_skin", error: skin.error });
+  // No owner: it ships with the game.
+  db.insert(skins)
+    .values(skinRow(DEFAULT_SKIN_ID, null, skin.value, now))
+    .onConflictDoNothing()
+    .run();
+  return ok(undefined);
+}
+
+// ---------------------------------------------------------------------------
 
 /**
  * Seeds the monsters, but only into a database that has none. Checking "is
@@ -260,6 +367,9 @@ export function seed(db: Db): Result<void, SeedError> {
 
   const map = ensureStarterMap(db);
   if (!map.ok) return map;
+
+  const look = ensureDefaultSkin(db, now);
+  if (!look.ok) return look;
 
   const monsters = seedMonsters(db, now);
   if (!monsters.ok) return monsters;

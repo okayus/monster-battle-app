@@ -2,6 +2,7 @@
  * Skin routes — the first slice that goes all the way through
  * (docs/05-roadmap.md, Step 2).
  *
+ *   GET  /api/skins             every skin by name, for choosing what to wear
  *   POST /api/skins             the editor's output: validated, then stored twice
  *   GET  /api/skins/:id         the render-ready form, exactly as stored
  *   GET  /api/skins/:id/source  the editable form, for opening a skin in the editor
@@ -14,16 +15,30 @@
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 
+import type { WearableSkin } from "@mba/core";
 import { skins } from "@mba/db";
 import type { Db } from "@mba/db";
 import { SKIN_SPEC, parseSkin } from "@mba/sprite";
 
 import { getUserId } from "../auth.js";
 import { jsonBodyLimit, readJson } from "../http.js";
-import { skinRow } from "../skins.js";
+import { listSkins, skinRow } from "../skins.js";
 
 export function skinRoutes(db: Db) {
   const routes = new Hono();
+
+  routes.get("/", (c) => {
+    const userId = getUserId(c);
+    // Names only. A drawing is asked for by id, by whoever wants to show it.
+    // And whose a skin is leaves the server as "yours" or "not yours": the
+    // list is the same for everyone, but nobody is handed another user's id.
+    const wearable: WearableSkin[] = listSkins(db).map((skin) => ({
+      id: skin.id,
+      name: skin.name,
+      mine: skin.ownerId === userId,
+    }));
+    return c.json(wearable);
+  });
 
   routes.post(
     "/",

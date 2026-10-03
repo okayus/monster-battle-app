@@ -576,3 +576,15 @@ export interface SkinSummary {
   /** Null for the skins that ship with the game. */
   ownerId: string | null;
 }
+
+/**
+ * A skin as a player's wardrobe lists it. Whose it is has been narrowed to the
+ * one thing the player asking needs to know: other users' ids stay on the
+ * server.
+ */
+export interface WearableSkin {
+  id: string;
+  name: string;
+  /** True if the player asking drew it. */
+  mine: boolean;
+}

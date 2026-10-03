@@ -14,6 +14,7 @@ import {
 } from "@mba/db";
 import type { RenderableSkin } from "@mba/sprite";
 
+import { DEFAULT_SKIN_ID } from "./appearance.js";
 import { LOCAL_USER_ID } from "./auth.js";
 import { START_MAP_ID } from "./maps.js";
 import { encountersOn, findSpecies, leadMonsterOf } from "./monsters.js";
@@ -100,6 +101,18 @@ describe("seed", () => {
     expect(seed(db).ok).toBe(true);
     expect(seed(db).ok).toBe(true);
     expect(count()).toEqual(before);
+  });
+
+  it("gives a database from before there was a default skin one, on its next boot", () => {
+    const db = seeded();
+    // What such a database looks like: monsters and all, but nothing to wear.
+    db.delete(skins).where(eq(skins.id, DEFAULT_SKIN_ID)).run();
+
+    expect(seed(db).ok).toBe(true);
+    const skin = db.select().from(skins).where(eq(skins.id, DEFAULT_SKIN_ID)).get();
+    expect(skin?.ownerId).toBeNull();
+    const renderable = JSON.parse(skin?.renderable ?? "null") as RenderableSkin;
+    for (const part of renderable.parts) expect(part.frames[0]?.rects.length).toBeGreaterThan(0);
   });
 
   it("does not put back what was removed after the first boot", () => {
