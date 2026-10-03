@@ -21,6 +21,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { appearanceRoutes } from "./routes/appearance.js";
 import { battleRoutes } from "./routes/battles.js";
 import { mapRoutes } from "./routes/maps.js";
+import { monsterRoutes } from "./routes/monsters.js";
 import { saveRoutes } from "./routes/save.js";
 import { skinRoutes } from "./routes/skins.js";
 import { travelRoutes } from "./routes/travel.js";
@@ -47,13 +48,14 @@ export function createApp({ db, migrationsApplied, random }: AppDeps) {
   app.route("/api/save", saveRoutes(db));
   app.route("/api/travel", travelRoutes(db));
   app.route("/api/appearance", appearanceRoutes(db));
+  app.route("/api/monsters", monsterRoutes(db));
   app.route("/api/battles", battleRoutes(db, random));
 
   // Everything under this prefix goes through one authorization check, which
   // the admin router attaches to itself.
   app.route("/api/admin", adminRoutes(db));
 
-  // Not built: /api/me and /api/monsters. Nothing on screen needs them yet
+  // Not built: /api/me. Nothing on screen needs it yet
   // (docs/04-api-design.md §ゲーム API).
 
   return app;

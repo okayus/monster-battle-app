@@ -269,7 +269,10 @@ export interface Move {
   power: number;
 }
 
-/** Immutable master data for a monster kind. */
+/**
+ * Immutable master data for a monster kind. The three numbers are what a
+ * monster of this kind has at level 1; `statAt` says what they grow into.
+ */
 export interface Species {
   id: string;
   name: string;
@@ -281,11 +284,127 @@ export interface Species {
   moves: Move[];
 }
 
-/** A monster a player owns: a species, and what the player has made of it. */
+/**
+ * A monster a player owns: a species, and what has become of it — which is
+ * two numbers, and neither of them is one a screen shows. Its level and its
+ * health are worked out from these each time they are needed (`grown`).
+ */
 export interface OwnedMonster {
   id: string;
   species: Species;
   nickname: string | null;
+  /** Experience earned so far. */
+  exp: number;
+  /** Health lost and not yet got back. */
+  damage: number;
+}
+
+// ---------------------------------------------------------------------------
+// Growth
+//
+// How a monster's stored numbers become the ones on screen. The curve is here,
+// in code, and not in the database: it is the author's to change, with a
+// deploy, and it then holds for every monster at once. Nothing derived from it
+// is stored, so there is nothing to go back and correct when it changes.
+// ---------------------------------------------------------------------------
+
+export const GROWTH = {
+  /** The level a monster stops at. */
+  maxLevel: 50,
+} as const;
+
+/** The experience at which a level begins. Level 1 begins with none. */
+export function expToReach(level: number): number {
+  const levelsUp = level - 1;
+  return 10 * levelsUp * levelsUp;
+}
+
+/**
+ * The level of a monster with this much experience: always at least 1, never
+ * more than the top level, whatever number it is handed. "A level is 1 or
+ * more" is therefore not something anyone has to check — there is no stored
+ * level that could be 0.
+ */
+export function levelOf(exp: number): number {
+  let level = 1;
+  // Counting up, with whole numbers only. NaN is not >= anything, so it stays at 1.
+  while (level < GROWTH.maxLevel && exp >= expToReach(level + 1)) level++;
+  return level;
+}
+
+/** One of a species' numbers as it is at a level: a tenth of it more for each level gained. */
+export function statAt(base: number, level: number): number {
+  return base + Math.floor((base * (level - 1)) / 10);
+}
+
+/** A monster's numbers as they are right now. */
+export interface Grown {
+  level: number;
+  maxHp: number;
+  hp: number;
+  attack: number;
+  defense: number;
+}
+
+/**
+ * Works out what a stored monster is right now.
+ *
+ * Health is what is left of the most it could be, and it is held to both
+ * ends. It cannot exceed the maximum, because it is the maximum less
+ * something. And outside a battle it is never 0: a lost battle ends with the
+ * monster restored (`settle`), so the only way down to nothing is a species
+ * whose health was lowered, by an edit, below the damage one of its monsters
+ * had already taken — and that monster is left standing, on 1.
+ */
+export function grown(monster: Pick<OwnedMonster, "species" | "exp" | "damage">): Grown {
+  const level = levelOf(monster.exp);
+  const maxHp = statAt(monster.species.maxHp, level);
+  const left = maxHp - monster.damage;
+  return {
+    level,
+    maxHp,
+    // Written this way round so that NaN, too, comes out as 1.
+    hp: left >= 1 ? Math.min(maxHp, left) : 1,
+    attack: statAt(monster.species.attack, level),
+    defense: statAt(monster.species.defense, level),
+  };
+}
+
+/** A player's monster as the screens need it. */
+export interface MonsterView {
+  id: string;
+  name: string;
+  skinId: string;
+  level: number;
+  exp: number;
+  /** The experience at which the next level begins, or null at the top level. */
+  nextLevelAt: number | null;
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  moves: Move[];
+}
+
+export function viewMonster(monster: OwnedMonster): MonsterView {
+  const now = grown(monster);
+  return {
+    id: monster.id,
+    name: monster.nickname ?? monster.species.name,
+    skinId: monster.species.skinId,
+    level: now.level,
+    exp: monster.exp,
+    nextLevelAt: now.level < GROWTH.maxLevel ? expToReach(now.level + 1) : null,
+    hp: now.hp,
+    maxHp: now.maxHp,
+    attack: now.attack,
+    defense: now.defense,
+    moves: monster.species.moves.map((move) => ({
+      id: move.id,
+      name: move.name,
+      power: move.power,
+    })),
+  };
 }
 
 // ---------------------------------------------------------------------------

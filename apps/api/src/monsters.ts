@@ -65,19 +65,42 @@ export function encountersOn(db: Db, mapId: string): Weighted<Species>[] {
   return entries;
 }
 
-/** The monster a player sends into battle: the first one they got. */
-export function leadMonsterOf(db: Db, userId: string): OwnedMonster | undefined {
-  const row = db
+/**
+ * A player's monsters, in the order they got them.
+ *
+ * This is where a database row becomes the domain's `OwnedMonster`: the
+ * species is looked up and attached, and the two stored numbers are passed on
+ * as they are. What they amount to — a level, a health — is not decided here
+ * but by the rules in `@mba/core`, each time someone needs to know.
+ */
+export function monstersOf(db: Db, userId: string): OwnedMonster[] {
+  const rows = db
     .select()
     .from(ownedMonsters)
     .where(eq(ownedMonsters.userId, userId))
+    // An explicit order, and one that cannot tie: "the first one" has to mean
+    // the same monster every time it is asked.
     .orderBy(asc(ownedMonsters.createdAt), asc(ownedMonsters.id))
-    .get();
-  if (row === undefined) return undefined;
+    .all();
 
-  const kind = findSpecies(db, row.speciesId);
-  if (kind === undefined) return undefined;
-  return { id: row.id, species: kind, nickname: row.nickname };
+  const owned: OwnedMonster[] = [];
+  for (const row of rows) {
+    const kind = findSpecies(db, row.speciesId);
+    if (kind === undefined) continue;
+    owned.push({
+      id: row.id,
+      species: kind,
+      nickname: row.nickname,
+      exp: row.exp,
+      damage: row.damage,
+    });
+  }
+  return owned;
+}
+
+/** The monster a player sends into battle: the first one they got. */
+export function leadMonsterOf(db: Db, userId: string): OwnedMonster | undefined {
+  return monstersOf(db, userId)[0];
 }
 
 // ---------------------------------------------------------------------------
