@@ -51,12 +51,15 @@
 
 ---
 
-## Step 3 — マップを表示して歩く
+## Step 3 — マップを表示して歩く（完了）
 
 1. `maps` テーブルと `GET /api/maps/:id`
 2. `@mba/core` の `step()` を実装（純粋・テストあり）
 3. `apps/web` にマップ画面。タイルは CSS グリッドで描く
 4. `saves` テーブルと `PUT /api/save`。リロードしても位置が残ること
+
+実装時の判断は [docs/01-architecture.md](01-architecture.md) §データの流れ（移動とセーブを例に）、
+[docs/03-data-model.md](03-data-model.md) §マップ、[docs/04-api-design.md](04-api-design.md) §実装 に追記した。
 
 ---
 

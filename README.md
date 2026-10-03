@@ -102,17 +102,19 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 ## 現在の状態
 
-**Step 2（スキンを保存して表示する）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
+**Step 3（マップを表示して歩く）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
 
-最初の縦の串が通っている。
+縦の串が 2 本通っている。
 
 ```
 エディタ（最小） → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示
+マップ画面 → step() で移動 → PUT /api/save → SQLite → GET /api/save → 同じ位置から再開
 ```
 
+- `@mba/core` … `step()`（移動）と、タイルの上に立てるかの判定。単体テストあり。バトルの計算は未実装
 - `@mba/sprite` … `parseSkin()`（検証）と `toRenderable()`（矩形結合）。単体テストあり
 - `@mba/sprite-react` … `<Sprite>`。手書きのサンプルスキンを描けることをテストで確認済み
-- `@mba/db` … `users` と `skins`。最初のマイグレーションを生成済み
-- `@mba/api` … スキンの保存と取得。インメモリの SQLite でハンドラをテストしている
-- `@mba/web` … 最小のエディタ（1 パーツ・1 コマ・固定の数色）と、保存したスキンの表示
-- まだ無いもの … マップ、バトル、管理画面の中身。`@mba/core` の関数は未実装であることが分かる形にしてある
+- `@mba/db` … `users`・`skins`・`maps`・`saves`
+- `@mba/api` … スキンの保存と取得、マップの取得、セーブの取得と保存。インメモリの SQLite でハンドラをテストしている
+- `@mba/web` … マップ画面（矢印キーか WASD で歩く。位置は自動で保存される）と、最小のスキンエディタ
+- まだ無いもの … バトル、管理画面の中身。マップは起動時に種まきした 1 枚だけ

@@ -13,7 +13,7 @@
 
 ## テーブル方針
 
-`packages/db/src/schema.ts` に定義済みなのは `users` と `skins`。残りはスライスを実装するたびに足す。
+`packages/db/src/schema.ts` に定義済みなのは `users`・`skins`・`maps`・`saves`。残りはスライスを実装するたびに足す。
 
 ### マスターデータ（管理画面が編集する）
 
@@ -22,7 +22,7 @@
 | `species` | id, name, max_hp, attack, defense, skin_id | モンスターの種族。絵は `skin_id` の参照だけ |
 | `moves` | id, name, power | 技 |
 | `species_moves` | species_id, move_id | 種族が覚える技 |
-| `maps` | id, name, width, height, tiles, encounter_rate | `tiles` はタイル ID の配列（JSON か TEXT） |
+| `maps` | id, name, width, height, tiles, spawn_x, spawn_y, encounter_rate | `tiles` はタイル ID の配列（JSON を TEXT で）。`encounter_rate` は Step 4 で足す |
 | `map_encounters` | map_id, species_id, weight | どのマップに何が出るか |
 
 ### ユーザーデータ
@@ -30,7 +30,7 @@
 | テーブル | 主な列 | 補足 |
 |---|---|---|
 | `users` | id, display_name, created_at | ローカル学習用。認証は docs/04 参照 |
-| `saves` | user_id, map_id, x, y, updated_at | セーブデータ。1 ユーザー 1 行から始める |
+| `saves` | user_id, map_id, x, y, updated_at | セーブデータ。1 ユーザー 1 行（`user_id` が主キー）なので、保存は上書きになる |
 | `owned_monsters` | id, user_id, species_id, nickname, level, exp, hp | 所持モンスター |
 | `appearances` | user_id, skin_id, variant_overrides, color_overrides | **見た目のレシピ**。数十バイト |
 
@@ -49,6 +49,27 @@
 どちらも JSON を TEXT で持つ。**`@mba/db` はその中身の形を知らない**（`@mba/sprite` に依存しない）。
 入力を `Skin` にするのは API の `parseSkin()` で、DB 層は渡された文字列をしまうだけ。
 行の型を `SkinRow` と呼んで `Skin` と区別しているのも同じ理由（下の「型はどこに置くか」）。
+
+### マップ
+
+**タイル ID は種類の名前そのもの**（`"path"` / `"grass"` / `"tree"` / `"water"`）。数値にしていない。
+数値は `TILE_KINDS` の並びと組でしか意味を持たず、並びを入れ替えた瞬間に保存済みのマップが黙って別物になる。
+名前ならそれ自体が意味を持つ。マップはマスターデータで数も少ないので、バイト数より読みやすさを取った
+（スキンのセルは逆で、数が多いから番号とランレングスにしている）。
+
+**`tiles` は行ごとの配列ではなく、平らな配列**（`width × height` 個、左上から右へ、上から下へ）。
+行の配列だと「行ごとに長さが違うマップ」が書けてしまう。`width` を 1 回だけ持つ形なら、そういうマップは表現できない。
+代わりに、座標から添字を出すときの範囲チェックが要る（`x = width` が次の行の先頭を指してしまう）。
+これは `@mba/core` の `tileAt()` 1 箇所に閉じ込めてある。
+
+**歩けるかどうかは保存しない。** タイルの種類から `@mba/core` の `isWalkable()` が導く。
+マップ側に「この木は通れる」と書ける場所を作ると、そのための規則が別に要るようになる。
+
+**`spawn_x` / `spawn_y` は、セーブが無いプレイヤーの開始位置。** 必ず歩けるタイルを指す。
+
+**最初のマップは API の起動時に種まきする**（`apps/api/src/maps.ts` の `ensureStarterMap()`）。
+管理画面（Step 5）ができるまでマップを作る手段が無いため。行が無いときだけ入れ、あれば触らない。
+管理画面で編集した後は DB の行が正本で、コード内の絵は出発点でしかない。
 
 ## マイグレーション
 
