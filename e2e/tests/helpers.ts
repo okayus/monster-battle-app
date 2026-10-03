@@ -6,7 +6,7 @@
  */
 
 import { expect } from "@playwright/test";
-import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import type { APIRequestContext, APIResponse, Locator, Page } from "@playwright/test";
 
 export interface Position {
   x: number;
@@ -249,4 +249,189 @@ export async function visit(
   const travelled = await request.post("/api/travel");
   expect(travelled.ok(), "POST /api/travel").toBe(true);
   await setStarterExits(request, []);
+}
+
+// ---------------------------------------------------------------------------
+// Monsters, and battles a test can count on the outcome of
+// ---------------------------------------------------------------------------
+
+export interface MonsterView {
+  id: string;
+  name: string;
+  level: number;
+  exp: number;
+  nextLevelAt: number | null;
+  hp: number;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  battleId: string | null;
+}
+
+/** The monster the player fights with, as the server has it. */
+export async function leadMonster(request: APIRequestContext): Promise<MonsterView> {
+  const response = await request.get("/api/monsters");
+  expect(response.ok(), "GET /api/monsters").toBe(true);
+  const [first] = (await response.json()) as MonsterView[];
+  if (first === undefined) throw new Error("the player has no monster");
+  return first;
+}
+
+interface Battle {
+  id: string;
+  turn: number;
+  status: "ongoing" | "won" | "lost";
+  player: { moves: { id: string }[] };
+}
+
+/**
+ * Plays the battle the player's monster is in to its end, through the API.
+ * Does nothing if it is in none.
+ *
+ * A monster is in one battle at a time, and the server keeps a battle that was
+ * left halfway. A test that wants a battle of its own therefore has to see
+ * off whatever an earlier test left behind.
+ */
+export async function finishBattle(request: APIRequestContext): Promise<void> {
+  const { battleId } = await leadMonster(request);
+  if (battleId === null) return;
+
+  let battle = (await (await request.get(`/api/battles/${battleId}`)).json()) as Battle;
+  // Every hit does at least 1, so this is more turns than a battle can take.
+  for (let turn = 0; turn < 2000 && battle.status === "ongoing"; turn++) {
+    const response = await request.post(`/api/battles/${battle.id}/turn`, {
+      data: { moveId: battle.player.moves[0]?.id, turn: battle.turn },
+    });
+    expect(response.ok(), `POST turn ${battle.turn}`).toBe(true);
+    battle = ((await response.json()) as { battle: Battle }).battle;
+  }
+  expect(battle.status, "the battle was played to its end").not.toBe("ongoing");
+}
+
+/**
+ * Wild monsters whose battles go one way. The server rolls real dice, so a
+ * test cannot arrange a win by choosing the rolls; it arranges one by choosing
+ * who is fought. Each of these comes out the same whatever is rolled, and
+ * whatever level the player's monster has reached by the time the test runs.
+ */
+const OPPONENTS = {
+  /** Faints at the first hit, before it can answer. A win, with nothing lost. */
+  pushover: { name: "よわダマ", maxHp: 1, attack: 1, defense: 1, power: 1 },
+  /**
+   * Too hard to hurt for more than 1 a hit, with 2 health: it takes one hit,
+   * answers it for exactly 1, and faints at the second. A win, 1 health down.
+   */
+  scratcher: { name: "かたダマ", maxHp: 2, attack: 1, defense: 999, power: 1 },
+  /** Cannot be brought down in time, and hits for thousands. A loss on the first turn. */
+  crusher: { name: "つよダマ", maxHp: 999, attack: 999, defense: 999, power: 999 },
+} as const;
+
+export type Opponent = keyof typeof OPPONENTS;
+
+/** Where the grass is on a pond made by `createPond`. */
+export const POND_GRASS: Position = { x: 1, y: 0 };
+/** Where a pond made by `arena` has its way back to the starter map. */
+const POND_WAY_HOME: Position = { x: 0, y: 1 };
+
+interface Arena {
+  mapId: string;
+  mapName: string;
+  speciesId: string;
+  speciesName: string;
+  moveId: string;
+}
+
+const RUN = Date.now().toString(36);
+const arenas = new Map<Opponent, Arena>();
+/** How many arenas this run has made. Part of each name, so that one made again is not a namesake. */
+let arenasMade = 0;
+
+async function idOf(response: APIResponse, what: string): Promise<string> {
+  expect(response.status(), what).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+}
+
+/**
+ * A pond where only one kind of monster lives. Made the first time it is
+ * asked for, and kept until `closeArenas`. Its spawn tile is a way back to the
+ * starter map, so a test that leaves the player here can be followed by one
+ * that starts at home.
+ */
+export async function arena(request: APIRequestContext, opponent: Opponent): Promise<Arena> {
+  const known = arenas.get(opponent);
+  if (known !== undefined) return known;
+
+  const { name, power, ...stats } = OPPONENTS[opponent];
+  arenasMade += 1;
+  const tag = `${RUN}-${arenasMade}`;
+  const speciesName = `${name}-${tag}`;
+  const mapName = `${name}の池-${tag}`;
+  const moveId = await idOf(
+    await request.post("/api/admin/moves", { data: { name: `${name}の技-${tag}`, power } }),
+    `POST a move for ${opponent}`,
+  );
+  const speciesId = await idOf(
+    await request.post("/api/admin/species", {
+      data: { name: speciesName, ...stats, skinId: "species-moss", moveIds: [moveId] },
+    }),
+    `POST the species ${opponent}`,
+  );
+  const mapId = await createPond(request, mapName, {
+    speciesIds: [speciesId],
+    exits: [{ at: POND_WAY_HOME, to: { mapId: "start", position: { x: 1, y: 1 } } }],
+  });
+
+  const made = { mapId, mapName, speciesId, speciesName, moveId };
+  arenas.set(opponent, made);
+  return made;
+}
+
+/** Brings the player back to the starter map from an arena, through its way home. */
+export async function goHome(request: APIRequestContext): Promise<void> {
+  const save = (await (await request.get("/api/save")).json()) as { mapId: string };
+  if (save.mapId === "start") return;
+
+  const stood = await request.put("/api/save", {
+    data: { mapId: save.mapId, position: POND_WAY_HOME },
+  });
+  expect(stood.ok(), "standing on the pond's way home").toBe(true);
+  const travelled = await request.post("/api/travel");
+  expect(travelled.ok(), "going home").toBe(true);
+}
+
+/**
+ * Leaves the player at home, in no battle, with a monster at full health: how
+ * a test finds things on an empty database.
+ *
+ * The game has one way to get a monster's health back, which is to lose a
+ * battle. So that is what this does, when there is health to get back.
+ */
+export async function rest(request: APIRequestContext): Promise<void> {
+  await finishBattle(request);
+  await goHome(request);
+  const before = await leadMonster(request);
+  if (before.hp === before.maxHp) return;
+
+  await visit(request, (await arena(request, "crusher")).mapId, POND_GRASS);
+  const started = await request.post("/api/battles");
+  expect(started.status(), "starting a battle to lose").toBe(201);
+  await finishBattle(request);
+
+  const after = await leadMonster(request);
+  expect(after.hp, "the monster's health after losing").toBe(after.maxHp);
+}
+
+/**
+ * Retires what `arena` made, in the order that is allowed: a map before the
+ * species that lives on it, a species before the move it knows. Retiring the
+ * map a player is standing on brings them home.
+ */
+export async function closeArenas(request: APIRequestContext): Promise<void> {
+  await finishBattle(request);
+  for (const made of arenas.values()) {
+    await setRetired(request, "maps", made.mapId, true);
+    await setRetired(request, "species", made.speciesId, true);
+    await setRetired(request, "moves", made.moveId, true);
+  }
+  arenas.clear();
 }

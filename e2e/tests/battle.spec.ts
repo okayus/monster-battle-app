@@ -4,12 +4,24 @@
  * The server draws real random numbers here, so nothing below assumes who
  * turns up, how hard a hit lands or who wins. What is checked is what must
  * hold whatever is rolled.
+ *
+ * A battle leaves things behind: the monster's health carries over, and a
+ * battle left halfway is the one the server gives back. So every test here
+ * begins by putting that right (`rest`), and what a battle leaves behind has
+ * tests of its own (growth.spec.ts).
  */
 
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
-import { failOnPageErrors, standAt, storedPosition } from "./helpers.js";
+import {
+  closeArenas,
+  failOnPageErrors,
+  leadMonster,
+  rest,
+  standAt,
+  storedPosition,
+} from "./helpers.js";
 
 interface BattleView {
   id: string;
@@ -28,8 +40,12 @@ async function health(page: Page, side: "こちら" | "あいて"): Promise<numb
   return Number(await bar.getAttribute("value"));
 }
 
-/** From the grass at (5,1) into a battle, the way a player gets there. */
+/**
+ * From the grass at (5,1) into a new battle, the way a player gets there: with
+ * a rested monster, and no battle left over from the test before.
+ */
 async function startBattle(page: Page, request: APIRequestContext): Promise<string> {
+  await rest(request);
   await standAt(request, 5, 1);
   await page.goto("/");
   await page.getByRole("button", { name: "草むらを調べる" }).click();
@@ -49,10 +65,15 @@ test.describe("a battle", () => {
     failOnPageErrors(page);
   });
 
+  test.afterAll(async ({ request }) => {
+    await closeArenas(request);
+  });
+
   test("can only be started in the grass, once the step there is saved", async ({
     page,
     request,
   }) => {
+    await rest(request);
     await standAt(request, 4, 1);
     await page.goto("/");
     const search = page.getByRole("button", { name: "草むらを調べる" });
@@ -65,9 +86,14 @@ test.describe("a battle", () => {
     await expect(search).toBeEnabled();
   });
 
-  test("starts with both monsters at full health and drawn", async ({ page, request }) => {
+  test("starts with a rested monster and a wild one at full health, both drawn", async ({
+    page,
+    request,
+  }) => {
     const id = await startBattle(page, request);
     const stored = await fetchBattle(request, id);
+    // The battle is this monster's: the list of monsters says which one it is in.
+    expect((await leadMonster(request)).battleId).toBe(id);
 
     expect(await health(page, "こちら")).toBe(stored.player.maxHp);
     expect(await health(page, "あいて")).toBe(stored.enemy.maxHp);
@@ -86,6 +112,7 @@ test.describe("a battle", () => {
 
   test("is played to its end, one move at a time", async ({ page, request }) => {
     await startBattle(page, request);
+    const before = await leadMonster(request);
     const log = battle(page).getByRole("list", { name: "ログ" }).getByRole("listitem");
     const result = battle(page).getByRole("status");
     const firstMove = battle(page).getByRole("group", { name: "技" }).getByRole("button").first();
@@ -115,11 +142,20 @@ test.describe("a battle", () => {
     // Nothing left to choose once it is over.
     await expect(battle(page).getByRole("group", { name: "技" })).toHaveCount(0);
 
+    // A win leaves the player on the grass. A loss has put them back at the
+    // start, and the map shows whichever the server says.
+    const here = won ? { x: 5, y: 1 } : { x: 1, y: 1 };
     await battle(page).getByRole("link", { name: "マップに戻る" }).click();
     await expect(page.getByRole("region", { name: "マップ" }).getByText("現在地:")).toContainText(
-      "(5, 1)",
+      `(${here.x}, ${here.y})`,
     );
-    expect(await storedPosition(request)).toEqual({ x: 5, y: 1 });
+    expect(await storedPosition(request)).toEqual(here);
+
+    // And the monster has what the battle left it with.
+    const after = await leadMonster(request);
+    expect(after.battleId).toBeNull();
+    expect(after.hp).toBe(won ? after.maxHp - (before.maxHp - mine) : after.maxHp);
+    expect(after.exp > before.exp).toBe(won);
   });
 
   test("is still there after a reload, exactly as it stood", async ({ page, request }) => {
