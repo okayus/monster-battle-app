@@ -36,6 +36,13 @@
       "when": 1791021508025,
       "tag": "0004_appearances",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791025616393,
+      "tag": "0005_retired_at",
+      "breakpoints": true
     }
   ]
 }

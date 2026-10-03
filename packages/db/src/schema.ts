@@ -10,6 +10,17 @@
 
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+/**
+ * When a row was retired, or null while it is in use.
+ *
+ * Skins and master data are never deleted (docs/03-data-model.md §削除しない):
+ * saves, looks and owned monsters refer to them, and a row that vanished would
+ * leave those pointing at nothing. Retiring keeps the row and sets this. What
+ * "retired" then means — left out of lists, fallen back from — is decided by
+ * the code that reads, not here.
+ */
+const retiredAt = () => integer("retired_at", { mode: "timestamp" });
+
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   displayName: text("display_name").notNull(),
@@ -48,6 +59,7 @@ export const skins = sqliteTable("skins", {
   source: text("source").notNull(),
   renderable: text("renderable").notNull(),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  retiredAt: retiredAt(),
 });
 
 // Named *Row, not Skin: `Skin` is the validated shape in @mba/sprite, and a
@@ -75,6 +87,7 @@ export const maps = sqliteTable("maps", {
   /** Where a player with no save starts. */
   spawnX: integer("spawn_x").notNull(),
   spawnY: integer("spawn_y").notNull(),
+  retiredAt: retiredAt(),
 });
 
 export type MapRow = typeof maps.$inferSelect;
@@ -134,6 +147,7 @@ export const moves = sqliteTable("moves", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   power: integer("power").notNull(),
+  retiredAt: retiredAt(),
 });
 
 export type MoveRow = typeof moves.$inferSelect;
@@ -151,6 +165,7 @@ export const species = sqliteTable("species", {
   skinId: text("skin_id")
     .notNull()
     .references(() => skins.id),
+  retiredAt: retiredAt(),
 });
 
 export type SpeciesRow = typeof species.$inferSelect;
