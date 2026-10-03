@@ -15,7 +15,17 @@ import type { AdminMap, AdminSpecies, Result, TileKind } from "@mba/core";
 
 import { createMap, describeError, fetchMaps, fetchSpecies, updateMap } from "./api.js";
 import type { ApiError } from "./api.js";
-import { blankMapForm, mapFormOf, moveSpawn, paintTile, setWeight, toMapInput } from "./forms.js";
+import {
+  blankMapForm,
+  hasExit,
+  mapFormOf,
+  moveSpawn,
+  paintTile,
+  setExitTarget,
+  setWeight,
+  toMapInput,
+  toggleExit,
+} from "./forms.js";
 import type { MapForm } from "./forms.js";
 import { offered, withMark } from "./retire.js";
 import { RetireControl } from "./RetireControl.js";
@@ -36,8 +46,8 @@ type SaveState =
   | { kind: "saved" }
   | { kind: "failed"; error: ApiError };
 
-/** What a click on the grid does: paint a kind of tile, or move the spawn. */
-type Brush = TileKind | "spawn";
+/** What a click on the grid does: paint a kind of tile, move the spawn, or put an exit down. */
+type Brush = TileKind | "spawn" | "exit";
 
 async function load(): Promise<Result<Loaded, ApiError>> {
   const [maps, species] = await Promise.all([fetchMaps(), fetchSpecies()]);
@@ -175,12 +185,30 @@ function MapEditor({ initial }: { initial: Loaded }) {
 
   const choose = (next: MapForm) => change(() => next);
 
+  /**
+   * Where a new exit leads until it is pointed somewhere else: the spawn of
+   * another map, which is always a tile that can be stood on. If this is the
+   * only map there is, an exit can still lead to another tile of itself.
+   */
+  const firstElsewhere = maps.find((map) => !map.retired && map.id !== form.id) ?? listed;
+
   // `paintTile` and `moveSpawn` hand back the same form when nothing changes,
   // so dragging across tiles that are already painted re-renders nothing.
   const apply = (index: number) =>
-    change((current) =>
-      brush === "spawn" ? moveSpawn(current, index) : paintTile(current, index, brush),
-    );
+    change((current) => {
+      if (brush === "spawn") return moveSpawn(current, index);
+      if (brush !== "exit") return paintTile(current, index, brush);
+      if (firstElsewhere === undefined) return current;
+      return toggleExit(current, index, {
+        mapId: firstElsewhere.id,
+        position: firstElsewhere.spawn,
+      });
+    });
+
+  // Painting is a stroke: it starts on press and goes on while the pointer is
+  // dragged. An exit is not painted, it is put down or taken away, and doing
+  // that twice undoes it — so the exit brush acts once, on the click.
+  const strokes = brush !== "exit";
 
   const startStroke = (index: number) => (event: PointerEvent<HTMLButtonElement>) => {
     // A touch pointer is captured by the element it lands on. Released, it
@@ -188,12 +216,12 @@ function MapEditor({ initial }: { initial: Loaded }) {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
-    apply(index);
+    if (strokes) apply(index);
   };
 
   const continueStroke = (index: number) => (event: PointerEvent<HTMLButtonElement>) => {
     // `buttons` is 1 only while the primary button (or a finger) is down.
-    if (event.buttons === 1) apply(index);
+    if (strokes && event.buttons === 1) apply(index);
   };
 
   const submit = async () => {
@@ -280,6 +308,14 @@ function MapEditor({ initial }: { initial: Loaded }) {
             >
               開始位置
             </button>
+            <button
+              type="button"
+              aria-pressed={brush === "exit"}
+              style={brushStyle(brush === "exit", "#3b2a1a")}
+              onClick={() => setBrush("exit")}
+            >
+              <span style={{ color: "#f2e3b3" }}>出口</span>
+            </button>
           </div>
 
           <div
@@ -300,6 +336,7 @@ function MapEditor({ initial }: { initial: Loaded }) {
                 type="button"
                 data-tile={kind}
                 data-spawn={index === spawnIndex ? "" : undefined}
+                data-exit={hasExit(form, index) ? "" : undefined}
                 aria-label={`${index % form.width},${Math.floor(index / form.width)} ${TILE_NAMES[kind]}`}
                 style={{ ...cellBase, background: TILE_COLOURS[kind] }}
                 onPointerDown={startStroke(index)}
@@ -308,12 +345,77 @@ function MapEditor({ initial }: { initial: Loaded }) {
                 onClick={() => apply(index)}
               >
                 {index === spawnIndex ? "S" : ""}
+                {hasExit(form, index) ? "→" : ""}
               </button>
             ))}
           </div>
           <p>
-            S が開始位置。{form.width} × {form.height}（大きさは変えられない）
+            S が開始位置、→ が出口。{form.width} × {form.height}（大きさは変えられない）
           </p>
+
+          <fieldset>
+            <legend>出口（「出口」の筆でタイルを押すと置ける。もう一度押すと消える）</legend>
+            {form.exits.length === 0 && <p style={{ margin: 0 }}>このマップから出る道は無い。</p>}
+            {form.exits.map((exit) => (
+              <div
+                key={`${exit.at.x},${exit.at.y}`}
+                style={row}
+                role="group"
+                aria-label={`出口 (${exit.at.x}, ${exit.at.y})`}
+              >
+                <span>
+                  ({exit.at.x}, {exit.at.y}) から
+                </span>
+                <label>
+                  行き先のマップ{" "}
+                  <select
+                    value={exit.to.mapId}
+                    onChange={(event) => {
+                      // A newly chosen map is entered at its spawn: the one
+                      // tile of it that is certain to be standable.
+                      const target = maps.find((map) => map.id === event.target.value);
+                      if (target === undefined) return;
+                      change((current) =>
+                        setExitTarget(current, exit.at, {
+                          mapId: target.id,
+                          position: target.spawn,
+                        }),
+                      );
+                    }}
+                  >
+                    {offered(maps, [exit.to.mapId]).map((map) => (
+                      <option key={map.id} value={map.id}>
+                        {withMark(map.name, map.retired)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {(["x", "y"] as const).map((axis) => (
+                  <label key={axis}>
+                    行き先の {axis}{" "}
+                    <input
+                      type="number"
+                      min={0}
+                      style={{ width: "4rem" }}
+                      value={Number.isNaN(exit.to.position[axis]) ? "" : exit.to.position[axis]}
+                      onChange={(event) =>
+                        change((current) =>
+                          setExitTarget(current, exit.at, {
+                            mapId: exit.to.mapId,
+                            position: { ...exit.to.position, [axis]: event.target.valueAsNumber },
+                          }),
+                        )
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+            ))}
+            <p style={{ margin: "0.25rem 0 0" }}>
+              出口は片道。戻れるようにするには、行き先のマップにも出口を置く。
+              行き先が立てないタイルだと、保存のときに断られる。
+            </p>
+          </fieldset>
 
           <fieldset>
             <legend>草むらに出るモンスター（重み。0 は出ない）</legend>
