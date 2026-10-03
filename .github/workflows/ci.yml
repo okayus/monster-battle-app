@@ -1,0 +1,60 @@
+# CI: the two commands from docs/06-testing.md, and nothing else.
+#
+#   check   docker build --target check .
+#           types, lint, formatting, unit tests
+#
+#   e2e     docker compose -f docker-compose.e2e.yml up --build --exit-code-from e2e
+#           the production image, and a browser pointed at it
+#
+# Both are the commands a developer runs. That is the point of this file being
+# so short: it has no step of its own, so whatever fails here fails the same
+# way on any machine with Docker, with the same command.
+name: CI
+
+on:
+  # Only main. A pull request from a branch of this repository is a push as
+  # well, and would otherwise run everything twice.
+  push:
+    branches: [main]
+  pull_request:
+
+# The jobs read the repository and do nothing else with it.
+permissions:
+  contents: read
+
+jobs:
+  # Two jobs rather than one after the other: they answer different questions
+  # ("is the code sound?" and "does what we would ship work?"), neither needs
+  # the other's result, and the name of the red one says which kind of thing
+  # broke.
+  #
+  # `ubuntu-latest` is deliberate. The runner only has to have Docker. Which
+  # Node, which pnpm and which browser get used is decided by the Dockerfiles
+  # and the lockfiles, so a newer runner cannot change what is tested.
+  check:
+    name: Types, lint, formatting, unit tests
+    runs-on: ubuntu-latest
+    # Without a limit a hung job runs for six hours.
+    timeout-minutes: 15
+    steps:
+      # Pinned to a commit, with the tag it belongs to as a comment. A tag can
+      # be moved to different code after the fact; a commit cannot.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Nothing here pushes, so the token does not need to stay on disk —
+          # least of all in a directory that is about to become a Docker build
+          # context.
+          persist-credentials: false
+      - run: docker build --target check .
+
+  e2e:
+    name: End-to-end tests against the production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The exit code is the test runner's. A server that never becomes healthy
+      # fails the command too, before a single test has run.
+      - run: docker compose -f docker-compose.e2e.yml up --build --exit-code-from e2e
