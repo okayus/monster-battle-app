@@ -9,10 +9,11 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { RenderableSkin, Skin } from "@mba/sprite";
-import { Sprite, useElapsedMs } from "@mba/sprite-react";
 
 import { fetchSkin, fetchSkinSource } from "./api.js";
 import type { ApiError } from "./api.js";
+import { Playing } from "./Playing.js";
+import { hrefs } from "./route.js";
 
 type LoadState =
   | { kind: "loading" }
@@ -21,14 +22,6 @@ type LoadState =
 
 // The <svg> has a viewBox and no size of its own, so it fills this box.
 const frame: CSSProperties = { width: "12rem", border: "1px solid #888", lineHeight: 0 };
-
-/** A skin that moves, if it has more than one frame anywhere. */
-function Playing({ skin }: { skin: RenderableSkin }) {
-  const animated = skin.parts.some((part) => part.frames.length > 1);
-  // A still image has no use for a clock, so it is not given one.
-  const elapsedMs = useElapsedMs(animated);
-  return <Sprite skin={skin} elapsedMs={animated ? elapsedMs : undefined} />;
-}
 
 /**
  * The caller keys this component by `id`, so a different id is a fresh mount
@@ -85,6 +78,9 @@ export function SavedSkin({ id, onOpen }: { id: string; onOpen: (skin: Skin) => 
             </button>
           </p>
           <p>開くと、いまエディタにある絵は置きかわる。保存すると新しいスキンになる。</p>
+          <p>
+            このスキンは<a href={hrefs.look}>きがえ</a>で着られる。
+          </p>
         </>
       )}
       {openError !== null && <p role="alert">開けなかった（{openError.kind}）</p>}

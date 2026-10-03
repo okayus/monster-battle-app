@@ -8,6 +8,7 @@
  *
  *   #/              the map (and anything unrecognised)
  *   #/battles/<id>  a battle
+ *   #/look          choosing what to wear
  *   #/editor        the skin editor
  *   #/skins/<id>    the skin editor, showing a saved skin
  */
@@ -15,6 +16,7 @@
 export type Route =
   | { screen: "map" }
   | { screen: "battle"; battleId: string }
+  | { screen: "look" }
   | { screen: "editor"; skinId: string | null };
 
 /**
@@ -26,6 +28,7 @@ const BATTLE_HASH = /^#\/battles\/([0-9a-f-]{1,64})$/;
 
 export function parseRoute(hash: string): Route {
   if (hash === "#/editor") return { screen: "editor", skinId: null };
+  if (hash === "#/look") return { screen: "look" };
   const skinId = SKIN_HASH.exec(hash)?.[1];
   if (skinId !== undefined) return { screen: "editor", skinId };
   const battleId = BATTLE_HASH.exec(hash)?.[1];
@@ -36,6 +39,7 @@ export function parseRoute(hash: string): Route {
 /** The other direction: the hash for each place a link can go. */
 export const hrefs = {
   map: "#/",
+  look: "#/look",
   editor: "#/editor",
   skin: (id: string) => `#/skins/${id}`,
   battle: (id: string) => `#/battles/${id}`,

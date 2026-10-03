@@ -15,6 +15,9 @@ import type { Direction, GameMap, Position, TileKind } from "@mba/core";
 
 import { fetchMap, fetchSave, putSave, startBattle } from "./api.js";
 import type { ApiError } from "./api.js";
+import { fetchWornLook } from "./look/load.js";
+import type { WornLook } from "./look/load.js";
+import { Playing } from "./Playing.js";
 import { hrefs } from "./route.js";
 import { createSaver } from "./saver.js";
 import type { SaveStatus } from "./saver.js";
@@ -85,7 +88,7 @@ const tile: CSSProperties = {
   placeItems: "center",
 };
 
-const player: CSSProperties = {
+const dot: CSSProperties = {
   width: "60%",
   height: "60%",
   borderRadius: "50%",
@@ -93,6 +96,23 @@ const player: CSSProperties = {
   border: "2px solid #ffffff",
   boxSizing: "border-box",
 };
+
+// The <svg> has a viewBox and no size of its own, so it fills the tile.
+const figure: CSSProperties = { width: "100%", height: "100%", lineHeight: 0 };
+
+/**
+ * The player, on the tile they stand on: drawn in what they are wearing, or as
+ * a plain dot until that has loaded — and for good if it cannot be. A missing
+ * picture is not worth stopping a walk for.
+ */
+function PlayerMarker({ worn }: { worn: WornLook | null }) {
+  if (worn === null) return <div data-player style={dot} />;
+  return (
+    <div data-player style={figure}>
+      <Playing skin={worn.look} colours={worn.appearance.colours} />
+    </div>
+  );
+}
 
 const controls: CSSProperties = { display: "flex", gap: "0.5rem", margin: "0.75rem 0" };
 
@@ -109,6 +129,21 @@ function MapView({ map, start }: { map: GameMap; start: Position }) {
   const [position, setPosition] = useState(start);
   const [saveStatus, setSaveStatus] = useState<SaveStatus<ApiError> | null>(null);
   const [search, setSearch] = useState<SearchState>({ kind: "idle" });
+  /** What the player looks like. Null until it has loaded. */
+  const [worn, setWorn] = useState<WornLook | null>(null);
+
+  // Fetched beside the map, not before it: walking does not wait for a
+  // picture. It is held here and not in the marker, because the marker is a
+  // new element on every tile the player steps onto.
+  useEffect(() => {
+    let cancelled = false;
+    void fetchWornLook().then((result) => {
+      if (!cancelled && result.ok) setWorn(result.value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // One saver for the life of this view. It serialises the saves, so a burst
   // of steps cannot leave an older position stored last (see saver.ts).
@@ -177,7 +212,7 @@ function MapView({ map, start }: { map: GameMap; start: Position }) {
         {/* The grid never reorders, so a tile's position is a stable key. */}
         {map.tiles.map((kind, i) => (
           <div key={i} data-tile={kind} style={{ ...tile, background: TILE_COLOURS[kind] }}>
-            {i === playerIndex && <div data-player style={player} />}
+            {i === playerIndex && <PlayerMarker worn={worn} />}
           </div>
         ))}
       </div>

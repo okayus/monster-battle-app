@@ -6,9 +6,9 @@
  *   settings — account / preferences, and the entry point to the skin editor
  *   editor   — the dot-art editor that produces a skin
  *
- * Three slices are wired up so far: the map you can walk on, battles against
- * what lives in the grass, and a minimal skin editor. See docs/05-roadmap.md
- * for the order the rest gets built in.
+ * Four slices are wired up so far: the map you can walk on, battles against
+ * what lives in the grass, the skin editor, and choosing what to wear. See
+ * docs/05-roadmap.md for the order the rest gets built in.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -17,6 +17,7 @@ import type { CSSProperties } from "react";
 import { BattleScreen } from "./BattleScreen.js";
 import { fromSkin, newEditor } from "./editor/model.js";
 import { SkinEditor } from "./editor/SkinEditor.js";
+import { LookScreen } from "./look/LookScreen.js";
 import { MapScreen } from "./MapScreen.js";
 import { hrefs, parseRoute } from "./route.js";
 import type { Route } from "./route.js";
@@ -69,6 +70,9 @@ export function App() {
         <a href={hrefs.map} aria-current={route.screen === "map" ? "page" : undefined}>
           マップ
         </a>
+        <a href={hrefs.look} aria-current={route.screen === "look" ? "page" : undefined}>
+          きがえ
+        </a>
         <a href={hrefs.editor} aria-current={route.screen === "editor" ? "page" : undefined}>
           スキンエディタ
         </a>
@@ -80,6 +84,8 @@ export function App() {
       {route.screen === "map" && <MapScreen />}
 
       {route.screen === "battle" && <BattleScreen key={route.battleId} id={route.battleId} />}
+
+      {route.screen === "look" && <LookScreen />}
 
       {route.screen === "editor" && (
         <div style={columns}>

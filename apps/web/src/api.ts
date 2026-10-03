@@ -12,8 +12,8 @@
  */
 
 import { err, ok } from "@mba/core";
-import type { BattleView, GameMap, Result, SaveData, TurnOutcome } from "@mba/core";
-import type { RenderableSkin, Skin } from "@mba/sprite";
+import type { BattleView, GameMap, Result, SaveData, TurnOutcome, WearableSkin } from "@mba/core";
+import type { Appearance, RenderableSkin, Skin } from "@mba/sprite";
 
 /**
  * Why a call failed. `kind` is the API's own machine-readable `error.kind`
@@ -81,6 +81,31 @@ export function fetchSkin(id: string): Promise<Result<RenderableSkin, ApiError>>
  */
 export function fetchSkinSource(id: string): Promise<Result<Skin, ApiError>> {
   return request(`/api/skins/${encodeURIComponent(id)}/source`);
+}
+
+/** Every skin there is, by name: what there is to wear. The drawings are fetched one by one. */
+export function fetchSkins(): Promise<Result<WearableSkin[], ApiError>> {
+  return request("/api/skins");
+}
+
+/**
+ * What the player looks like, as a recipe. The server answers with the default
+ * look if nothing was ever chosen, so there is no "no look" to handle here.
+ */
+export function fetchAppearance(): Promise<Result<Appearance, ApiError>> {
+  return request("/api/appearance");
+}
+
+/**
+ * Replaces the player's look. Only the recipe is sent — ids and colours, never
+ * a drawing — and the answer is the recipe as the server wrote it down.
+ */
+export function putAppearance(appearance: Appearance): Promise<Result<Appearance, ApiError>> {
+  return request("/api/appearance", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(appearance),
+  });
 }
 
 /** Where the player is. The server answers with the starting point if nothing was ever saved. */
