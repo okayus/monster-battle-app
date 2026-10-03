@@ -214,6 +214,30 @@ describe("Sprite", () => {
     }
   });
 
+  it("wears other colours by setting those variables, without touching what is drawn", () => {
+    const skin = toRenderable(sampleSkin());
+    const worn = renderToStaticMarkup(
+      <Sprite
+        skin={skin}
+        colours={[
+          { id: "hair", hex: "#cc3344" },
+          { id: "shoes", hex: "#101010" },
+        ]}
+      />,
+    );
+
+    expect(worn).toContain('style="--c-hair:#cc3344;--c-shoes:#101010"');
+    // Every cell still asks for its variable and still carries the colour it
+    // was drawn in: with the two variables taken away, this is the same sprite.
+    expect(worn.replace(' style="--c-hair:#cc3344;--c-shoes:#101010"', "")).toBe(markupOf(skin));
+  });
+
+  it("sets no variables when no colours are worn", () => {
+    const skin = toRenderable(sampleSkin());
+    expect(markupOf(skin)).not.toContain("style=");
+    expect(renderToStaticMarkup(<Sprite skin={skin} colours={[]} />)).toBe(markupOf(skin));
+  });
+
   it("emits only svg, g and rect — there is nowhere for markup to appear", () => {
     const markup = markupOf(toRenderable(sampleSkin()));
     const tags = new Set([...markup.matchAll(/<([a-zA-Z-]+)/g)].map((m) => m[1]));

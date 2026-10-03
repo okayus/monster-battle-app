@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
+import type { CSSProperties } from "react";
 
 import { frameAt } from "@mba/sprite";
 import type { PaletteEntry, RenderableSkin } from "@mba/sprite";
@@ -21,6 +22,19 @@ function fillOf(palette: PaletteEntry[], index: number): string {
   // Same shape the exporter emits: a CSS variable with the authored colour as
   // fallback, so a colour can be overridden from outside without touching data.
   return `var(--c-${entry.id}, ${entry.hex})`;
+}
+
+/**
+ * The other half of `fillOf`: `--c-<id>: <hex>` for each colour to be worn in
+ * place of the drawn one. Both halves are in this file, so the name a cell
+ * asks for and the name a recolour sets cannot drift apart.
+ */
+function variablesOf(colours: readonly PaletteEntry[] | undefined): CSSProperties | undefined {
+  if (colours === undefined || colours.length === 0) return undefined;
+  const variables: Record<string, string> = {};
+  for (const { id, hex } of colours) variables[`--c-${id}`] = hex;
+  // Custom properties are valid CSS; React's types just do not list them.
+  return variables as CSSProperties;
 }
 
 export interface SpriteProps {
@@ -37,6 +51,16 @@ export interface SpriteProps {
    * server, where there is no clock at all.
    */
   elapsedMs?: number;
+  /**
+   * Colours to wear in place of the drawn ones, by palette id. They are set as
+   * CSS variables on the `<svg>`; every cell already asks for
+   * `var(--c-<id>, <the colour it was drawn in>)`, so the skin's data is not
+   * touched and the same skin can be on screen twice in different colours.
+   *
+   * Like `skin`, this is drawn as given. Whatever reaches it from a user has
+   * been through `parseAppearance` on the server first.
+   */
+  colours?: readonly PaletteEntry[];
   className?: string;
   /** Canvas size in user units. Must match what the skin was authored at. */
   size?: number;
@@ -62,10 +86,11 @@ export function useElapsedMs(playing: boolean, tickMs = 50): number {
   return playing ? elapsed : 0;
 }
 
-export function Sprite({ skin, frame = 0, elapsedMs, className, size = 16 }: SpriteProps) {
+export function Sprite({ skin, frame = 0, elapsedMs, colours, className, size = 16 }: SpriteProps) {
   return (
     <svg
       className={className}
+      style={variablesOf(colours)}
       viewBox={`0 0 ${size} ${size}`}
       // Without this the edges of each dot get antialiased when scaled up.
       shapeRendering="crispEdges"
