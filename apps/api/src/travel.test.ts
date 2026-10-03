@@ -247,10 +247,11 @@ describe("PUT /api/save, now that there is more than one map to be on", () => {
     expect(await saved(app)).toEqual({ mapId: id, position: { x: 0, y: 0 } });
   });
 
-  it("still does not ask how the player got to a tile of the map they are on", async () => {
+  it("still takes any tile of the map they are on that they could walk to, however far", async () => {
     const { app } = setup();
-    // From the spawn straight to the far corner of the path. Where the line
-    // was drawn in Step 3, and where it still is inside a map.
+    // From the spawn straight to the far corner of the path. Inside a map the
+    // question is whether there is a way there (save.test.ts), not whether
+    // each step of it was reported.
     expect((await putSave(app, { mapId: START_MAP_ID, position: { x: 14, y: 10 } })).status).toBe(
       200,
     );

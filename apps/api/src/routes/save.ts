@@ -2,7 +2,7 @@
  * Save routes — where the player is.
  *
  *   GET /api/save   the saved position, or the starting point if there is none
- *   PUT /api/save   store a position — on the map the player is already on
+ *   PUT /api/save   store a position — one the player could have walked to
  *
  * There is no id in either path. Whose save it is comes from `getUserId(c)`,
  * never from the request (docs/04-api-design.md §認証と認可).
@@ -11,7 +11,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { canStandOn } from "@mba/core";
+import { canStandOn, canWalkTo } from "@mba/core";
 import type { SaveData } from "@mba/core";
 import { saves } from "@mba/db";
 import type { Db } from "@mba/db";
@@ -70,10 +70,19 @@ export function saveRoutes(db: Db) {
 
     // The browser moves the player with the same `step()` the server could
     // run, but its word is not taken for it: a position is stored only if it
-    // is somewhere a player can actually be. What is *not* checked is how the
-    // player got there — see docs/04-api-design.md §実装.
+    // is somewhere a player can actually be.
     if (!canStandOn(map, position)) {
       return c.json({ error: { kind: "cannot_stand", mapId, position } }, 400);
+    }
+
+    // And only if the player could have walked there from where the server
+    // last had them. A battle won is worth something, so where a player may
+    // be is worth something too: grass behind a wall is out of reach of a
+    // request, exactly as it is out of reach of the arrow keys.
+    // Not checked: how many steps the walk takes, or how fast it was done —
+    // see docs/04-api-design.md §実装.
+    if (!canWalkTo(map, current.position, position)) {
+      return c.json({ error: { kind: "unreachable", mapId, position } }, 400);
     }
 
     const values = { mapId, x: position.x, y: position.y, updatedAt: new Date() };

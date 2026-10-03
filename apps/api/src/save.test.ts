@@ -1,12 +1,12 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
-import type { SaveData } from "@mba/core";
+import type { MapInput, SaveData } from "@mba/core";
 import { maps, saves } from "@mba/db";
 
 import { LOCAL_USER_ID } from "./auth.js";
 import { START_MAP_ID } from "./maps.js";
-import { firstTile, setup, starter } from "./testing.js";
+import { createMap, firstTile, setup, starter, visit } from "./testing.js";
 import type { TestApp } from "./testing.js";
 
 // ---------------------------------------------------------------------------
@@ -160,5 +160,136 @@ describe("PUT /api/save", () => {
     expect(res.status).toBe(413);
     expect(await res.json()).toEqual({ error: { kind: "body_too_large", max: 1024 } });
     expect(db.select().from(saves).all()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where a player may be, now that being somewhere is worth something
+//
+// A battle won leaves the monster with experience, and battles are fought on
+// the grass the server has the player standing on. So a save is taken only if
+// the player could have walked there (docs/04-api-design.md §実装).
+// ---------------------------------------------------------------------------
+
+/**
+ * Two rooms, and a wall of trees with no gap between them:
+ *
+ *        01234
+ *      0 .T..g      the left room: (0,0), and the spawn at (0,1)
+ *      1 @T...      the right room: everything past the trees; grass at (4,0)
+ */
+const ROOMS: MapInput = {
+  name: "ふたつの部屋",
+  width: 5,
+  height: 2,
+  tiles: ["path", "tree", "path", "path", "grass", "path", "tree", "path", "path", "path"],
+  spawn: { x: 0, y: 1 },
+  encounters: [{ speciesId: "moss", weight: 1 }],
+  exits: [],
+};
+const IN_THE_LEFT_ROOM = { x: 0, y: 1 };
+const IN_THE_RIGHT_ROOM = { x: 2, y: 1 };
+const GRASS_ON_THE_RIGHT = { x: 4, y: 0 };
+
+describe("PUT /api/save, asked for a tile the player would have had to walk to", () => {
+  it("refuses a tile on the far side of a wall, and leaves the save as it was", async () => {
+    const { app } = setup();
+    const id = await createMap(app, ROOMS);
+    await visit(app, id, IN_THE_LEFT_ROOM);
+
+    const res = await put(app, { mapId: id, position: GRASS_ON_THE_RIGHT });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: { kind: "unreachable", mapId: id, position: GRASS_ON_THE_RIGHT },
+    });
+    expect(await current(app)).toEqual({ mapId: id, position: IN_THE_LEFT_ROOM });
+  });
+
+  it("so a battle cannot be started on grass the player could not have reached", async () => {
+    const { app } = setup();
+    const id = await createMap(app, ROOMS);
+    await visit(app, id, IN_THE_LEFT_ROOM);
+    await put(app, { mapId: id, position: GRASS_ON_THE_RIGHT });
+
+    const res = await app.request("/api/battles", { method: "POST" });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: { kind: "no_encounters_here" } });
+  });
+
+  it("takes the very same tile from a player who came in on that side of the wall", async () => {
+    const { app } = setup();
+    const id = await createMap(app, ROOMS);
+    await visit(app, id, IN_THE_RIGHT_ROOM);
+
+    const res = await put(app, { mapId: id, position: GRASS_ON_THE_RIGHT });
+    expect(res.status).toBe(200);
+    expect(await current(app)).toEqual({ mapId: id, position: GRASS_ON_THE_RIGHT });
+    expect((await app.request("/api/battles", { method: "POST" })).status).toBe(201);
+  });
+
+  it("measures the walk from where the server has the player, whatever the request says", async () => {
+    const { app } = setup();
+    const id = await createMap(app, ROOMS);
+    await visit(app, id, IN_THE_LEFT_ROOM);
+
+    const res = await put(app, {
+      mapId: id,
+      position: GRASS_ON_THE_RIGHT,
+      from: IN_THE_RIGHT_ROOM,
+      current: { mapId: id, position: IN_THE_RIGHT_ROOM },
+    });
+    expect(res.status).toBe(400);
+    expect(await current(app)).toEqual({ mapId: id, position: IN_THE_LEFT_ROOM });
+  });
+
+  it("measures it from the last save that was taken, and a refused one is not that", async () => {
+    const { app } = setup();
+    const id = await createMap(app, ROOMS);
+    await visit(app, id, IN_THE_LEFT_ROOM);
+
+    // A step inside the left room is taken; the walk goes on from there.
+    expect((await put(app, { mapId: id, position: { x: 0, y: 0 } })).status).toBe(200);
+    // Asking twice does not turn the first, refused, answer into a way through.
+    expect((await put(app, { mapId: id, position: IN_THE_RIGHT_ROOM })).status).toBe(400);
+    expect((await put(app, { mapId: id, position: GRASS_ON_THE_RIGHT })).status).toBe(400);
+    expect(await current(app)).toEqual({ mapId: id, position: { x: 0, y: 0 } });
+  });
+
+  it("measures it from the spawn for a player who never saved", async () => {
+    const { app, db } = setup();
+    // Trees on both ways out of the spawn at (1,1): a new game is walled in.
+    const tiles = [...MAP.tiles];
+    tiles[1 * MAP.width + 2] = "tree";
+    tiles[2 * MAP.width + 1] = "tree";
+    db.update(maps)
+      .set({ tiles: JSON.stringify(tiles) })
+      .where(eq(maps.id, START_MAP_ID))
+      .run();
+
+    const res = await put(app, { mapId: START_MAP_ID, position: ON_GRASS });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: { kind: "unreachable", mapId: START_MAP_ID, position: ON_GRASS },
+    });
+    expect(db.select().from(saves).all()).toEqual([]);
+  });
+
+  it("does not ask how long the walk is: the far corner of the map, in one save", async () => {
+    const { app } = setup();
+    const farCorner = { x: 14, y: 10 };
+    expect((await put(app, { mapId: START_MAP_ID, position: farCorner })).status).toBe(200);
+    expect(await current(app)).toEqual({ mapId: START_MAP_ID, position: farCorner });
+  });
+
+  it("says a tile cannot be stood on before it says it cannot be reached", async () => {
+    const { app } = setup();
+    const id = await createMap(app, ROOMS);
+    await visit(app, id, IN_THE_LEFT_ROOM);
+
+    // The wall itself: nobody can stand there, from either side.
+    const res = await put(app, { mapId: id, position: { x: 1, y: 0 } });
+    expect(await res.json()).toEqual({
+      error: { kind: "cannot_stand", mapId: id, position: { x: 1, y: 0 } },
+    });
   });
 });

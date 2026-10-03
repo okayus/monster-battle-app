@@ -4,7 +4,7 @@
  * it, so it is not part of the build.
  */
 
-import type { AdminMap, GameMap, MapExit, Position, TileKind } from "@mba/core";
+import type { AdminMap, GameMap, MapExit, MapInput, Position, TileKind } from "@mba/core";
 import { createDb, runMigrations } from "@mba/db";
 
 import { createApp } from "./app.js";
@@ -53,6 +53,13 @@ export function rolls(...values: number[]): () => number {
 
 function json(method: string, body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+/** Makes a map the way the admin screen would, and returns its id. */
+export async function createMap(app: TestApp, input: MapInput): Promise<string> {
+  const res = await app.request("/api/admin/maps", json("POST", input));
+  if (res.status !== 201) throw new Error(`creating a map: ${await res.text()}`);
+  return ((await res.json()) as AdminMap).id;
 }
 
 /** Replaces the starter map's exits and leaves the rest of it as it is. */
