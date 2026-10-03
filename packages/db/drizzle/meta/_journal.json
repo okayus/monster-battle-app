@@ -15,6 +15,13 @@
       "when": 1791004496593,
       "tag": "0001_maps_and_saves",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791005708707,
+      "tag": "0002_monsters_and_battles",
+      "breakpoints": true
     }
   ]
 }

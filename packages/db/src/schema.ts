@@ -8,7 +8,7 @@
  * variants, which colours), and that recipe is a handful of bytes.
  */
 
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
@@ -91,3 +91,105 @@ export const saves = sqliteTable("saves", {
 
 export type SaveRow = typeof saves.$inferSelect;
 export type NewSaveRow = typeof saves.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Monsters — master data, to be edited from the admin screen
+// ---------------------------------------------------------------------------
+
+/** A move. What it does in a battle is decided by `@mba/core`, from `power`. */
+export const moves = sqliteTable("moves", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  power: integer("power").notNull(),
+});
+
+export type MoveRow = typeof moves.$inferSelect;
+
+/**
+ * A kind of monster. What it looks like is a reference to a skin, never the
+ * art itself — the same skins players draw, with no owner.
+ */
+export const species = sqliteTable("species", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  maxHp: integer("max_hp").notNull(),
+  attack: integer("attack").notNull(),
+  defense: integer("defense").notNull(),
+  skinId: text("skin_id")
+    .notNull()
+    .references(() => skins.id),
+});
+
+export type SpeciesRow = typeof species.$inferSelect;
+
+/** Which moves each species knows. The pair is the key, so a move is listed once. */
+export const speciesMoves = sqliteTable(
+  "species_moves",
+  {
+    speciesId: text("species_id")
+      .notNull()
+      .references(() => species.id),
+    moveId: text("move_id")
+      .notNull()
+      .references(() => moves.id),
+  },
+  (table) => [primaryKey({ columns: [table.speciesId, table.moveId] })],
+);
+
+/**
+ * Which species turn up on which map, and how often relative to each other.
+ * A weight, not a percentage: adding a species to a map does not mean
+ * re-balancing every other row so that they still add up to 100.
+ */
+export const mapEncounters = sqliteTable(
+  "map_encounters",
+  {
+    mapId: text("map_id")
+      .notNull()
+      .references(() => maps.id),
+    speciesId: text("species_id")
+      .notNull()
+      .references(() => species.id),
+    weight: integer("weight").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.mapId, table.speciesId] })],
+);
+
+// ---------------------------------------------------------------------------
+// Monsters — what belongs to a player
+// ---------------------------------------------------------------------------
+
+export const ownedMonsters = sqliteTable("owned_monsters", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  speciesId: text("species_id")
+    .notNull()
+    .references(() => species.id),
+  nickname: text("nickname"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+});
+
+export type OwnedMonsterRow = typeof ownedMonsters.$inferSelect;
+
+/**
+ * A battle in progress, or one that has ended.
+ *
+ * `state` is the whole battle as JSON (both sides' health, the turn count),
+ * and it is the only copy: the browser is shown a view of it and sends back
+ * nothing but the move it chose. `status` repeats one field of that state as a
+ * column so that "the battles still going on" can be asked in SQL.
+ */
+export const battles = sqliteTable("battles", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  status: text("status").notNull(),
+  state: text("state").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+});
+
+export type BattleRow = typeof battles.$inferSelect;
