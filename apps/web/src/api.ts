@@ -129,6 +129,15 @@ export function fetchMap(id: string): Promise<Result<GameMap, ApiError>> {
 }
 
 /**
+ * Goes through the exit the server has the player standing on. Like starting
+ * a battle, there is nothing to send: which exit and where it leads are both
+ * the server's to say. The answer is where the player is now.
+ */
+export function travelThroughExit(): Promise<Result<SaveData, ApiError>> {
+  return request("/api/travel", { method: "POST" });
+}
+
+/**
  * Starts a battle on the tile the server has the player on. There is nothing
  * to send: where the player is and who turns up are both the server's to say.
  */
