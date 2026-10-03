@@ -16,8 +16,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { createDb, runMigrations } from "@mba/db";
 
 import { createApp } from "./app.js";
-import { ensureLocalUser } from "./auth.js";
-import { ensureStarterMap } from "./maps.js";
+import { seed } from "./seed.js";
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "file:./data/app.db";
 const PORT = Number(process.env.PORT ?? 3000);
@@ -26,17 +25,17 @@ const db = createDb(DATABASE_URL);
 // Self-migrating on boot: a fresh clone plus `pnpm dev` just works, and the
 // production container needs no separate migrate step.
 const { applied } = runMigrations(db);
-ensureLocalUser(db);
 
-const seeded = ensureStarterMap(db);
+const seeded = seed(db);
 if (!seeded.ok) {
-  // The starter map is part of the source. If its drawing is malformed, that
+  // The seed data is part of the source. If a drawing in it is malformed, that
   // is a bug to fix before serving anything, not a state to keep running in.
-  console.error("the starter map is invalid:", seeded.error);
+  console.error("the seed data is invalid:", seeded.error);
   process.exit(1);
 }
 
-const app = createApp({ db, migrationsApplied: applied });
+// The one place the real random number generator is named.
+const app = createApp({ db, migrationsApplied: applied, random: Math.random });
 
 if (process.env.NODE_ENV === "production") {
   // One container, one port: the API also serves both SPA builds.

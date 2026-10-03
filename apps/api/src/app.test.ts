@@ -1,3 +1,4 @@
+import { eq, isNotNull } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { skins } from "@mba/db";
@@ -60,6 +61,21 @@ function post(app: App, body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
+type Db = ReturnType<typeof setup>["db"];
+
+/**
+ * The skins players have saved. The table is not empty to begin with — the
+ * skins that ship with the game are in it, with no owner — so "nothing was
+ * stored" has to mean "nothing with an owner".
+ */
+function savedByPlayers(db: Db) {
+  return db.select().from(skins).where(isNotNull(skins.ownerId)).all();
+}
+
+function skinById(db: Db, id: string) {
+  return db.select().from(skins).where(eq(skins.id, id)).get();
+}
+
 /** Saves a payload that is expected to be accepted, and returns its new id. */
 async function save(app: App, body: unknown): Promise<string> {
   const res = await post(app, body);
@@ -89,7 +105,7 @@ describe("POST /api/skins", () => {
     const { id } = (await res.json()) as { id: string };
     expect(res.headers.get("Location")).toBe(`/api/skins/${id}`);
 
-    const rows = db.select().from(skins).all();
+    const rows = savedByPlayers(db);
     expect(rows).toHaveLength(1);
     expect(rows[0]?.id).toBe(id);
     expect(rows[0]?.name).toBe("fixture");
@@ -105,9 +121,9 @@ describe("POST /api/skins", () => {
         { id: "hair", hex: "#5a3921" },
       ],
     });
-    await save(app, hostile);
+    const id = await save(app, hostile);
 
-    const row = db.select().from(skins).get();
+    const row = skinById(db, id);
     const skin = parsed(hostile);
     expect(row?.source).toBe(JSON.stringify(skin));
     expect(row?.renderable).toBe(JSON.stringify(toRenderable(skin)));
@@ -120,8 +136,8 @@ describe("POST /api/skins", () => {
 
   it("decides the owner on the server, whatever the body claims", async () => {
     const { app, db } = setup();
-    await save(app, inputWith({ ownerId: "someone-else", owner_id: "someone-else" }));
-    expect(db.select().from(skins).get()?.ownerId).toBe(LOCAL_USER_ID);
+    const id = await save(app, inputWith({ ownerId: "someone-else", owner_id: "someone-else" }));
+    expect(skinById(db, id)?.ownerId).toBe(LOCAL_USER_ID);
   });
 
   it("gives every skin its own id", async () => {
@@ -160,7 +176,7 @@ describe("POST /api/skins", () => {
       const res = await post(app, inputWith(patch));
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error });
-      expect(db.select().from(skins).all()).toEqual([]);
+      expect(savedByPlayers(db)).toEqual([]);
     });
 
     it("a body that is not JSON", async () => {
@@ -168,7 +184,7 @@ describe("POST /api/skins", () => {
       const res = await post(app, "{ not json");
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: { kind: "bad_json" } });
-      expect(db.select().from(skins).all()).toEqual([]);
+      expect(savedByPlayers(db)).toEqual([]);
     });
 
     it("a JSON body that is not a skin", async () => {
@@ -188,7 +204,7 @@ describe("POST /api/skins", () => {
       const res = await post(app, oversized, { "Content-Length": String(oversized.length) });
       expect(res.status).toBe(413);
       expect(await res.json()).toEqual(tooLarge);
-      expect(db.select().from(skins).all()).toEqual([]);
+      expect(savedByPlayers(db)).toEqual([]);
     });
 
     it("when the body is streamed with no declared size", async () => {

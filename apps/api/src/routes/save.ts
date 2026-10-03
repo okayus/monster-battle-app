@@ -8,7 +8,6 @@
  * never from the request (docs/04-api-design.md §認証と認可).
  */
 
-import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -19,7 +18,8 @@ import type { Db } from "@mba/db";
 
 import { getUserId } from "../auth.js";
 import { jsonBodyLimit, parseShape, readJson } from "../http.js";
-import { START_MAP_ID, findMap } from "../maps.js";
+import { findMap } from "../maps.js";
+import { loadSave } from "../saves.js";
 
 /** A save is a few dozen bytes. Anything near this is not a save. */
 const MAX_SAVE_BYTES = 1024;
@@ -38,27 +38,11 @@ export function saveRoutes(db: Db) {
   const routes = new Hono();
 
   routes.get("/", (c) => {
-    const row = db
-      .select()
-      .from(saves)
-      .where(eq(saves.userId, getUserId(c)))
-      .get();
-
-    if (row !== undefined) {
-      const map = findMap(db, row.mapId);
-      const position = { x: row.x, y: row.y };
-      // A save can outlive what it points at: the map may have been redrawn
-      // since, leaving a tree where the player was standing. That is decided
-      // here, once, so no screen has to handle "a position I cannot be at".
-      if (map !== undefined && canStandOn(map, position)) {
-        return c.json({ mapId: row.mapId, position } satisfies SaveData);
-      }
-    }
-
-    // No save, or one that no longer makes sense: a new game.
-    const start = findMap(db, START_MAP_ID);
-    if (start === undefined) return c.json({ error: { kind: "no_start_map" } }, 500);
-    return c.json({ mapId: start.id, position: start.spawn } satisfies SaveData);
+    // Always an answer for a known user: with no save, or one that no longer
+    // makes sense, `loadSave` gives the starting point (see saves.ts).
+    const save = loadSave(db, getUserId(c));
+    if (save === undefined) return c.json({ error: { kind: "no_start_map" } }, 500);
+    return c.json(save);
   });
 
   routes.put("/", jsonBodyLimit(MAX_SAVE_BYTES), async (c) => {

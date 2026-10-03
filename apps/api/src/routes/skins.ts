@@ -15,10 +15,11 @@ import { Hono } from "hono";
 
 import { skins } from "@mba/db";
 import type { Db } from "@mba/db";
-import { SKIN_SPEC, parseSkin, toRenderable } from "@mba/sprite";
+import { SKIN_SPEC, parseSkin } from "@mba/sprite";
 
 import { getUserId } from "../auth.js";
 import { jsonBodyLimit, readJson } from "../http.js";
+import { skinRow } from "../skins.js";
 
 export function skinRoutes(db: Db) {
   const routes = new Hono();
@@ -44,19 +45,9 @@ export function skinRoutes(db: Db) {
       const skin = parsed.value;
       const id = crypto.randomUUID();
 
+      // The owner is decided by the server. The body has no say in it.
       db.insert(skins)
-        .values({
-          id,
-          // Decided by the server. The body has no say in who owns the row.
-          ownerId: getUserId(c),
-          name: skin.name,
-          formatVersion: skin.formatVersion,
-          source: JSON.stringify(skin),
-          // The expensive step (merging cells into rectangles) happens here,
-          // once, so that reading a skin never has to do it.
-          renderable: JSON.stringify(toRenderable(skin)),
-          createdAt: new Date(),
-        })
+        .values(skinRow(id, getUserId(c), skin, new Date()))
         .run();
 
       return c.json({ id }, 201, { Location: `/api/skins/${id}` });

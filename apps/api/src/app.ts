@@ -17,6 +17,7 @@ import { Hono } from "hono";
 
 import type { Db } from "@mba/db";
 
+import { battleRoutes } from "./routes/battles.js";
 import { mapRoutes } from "./routes/maps.js";
 import { saveRoutes } from "./routes/save.js";
 import { skinRoutes } from "./routes/skins.js";
@@ -25,9 +26,15 @@ export interface AppDeps {
   db: Db;
   /** Reported by /api/health, so a boot that migrated is visible from outside. */
   migrationsApplied: number;
+  /**
+   * Where the server's random numbers come from: `Math.random` when it is
+   * really running, a scripted sequence in tests. Handlers draw from this and
+   * pass the numbers on; nothing in `@mba/core` draws its own.
+   */
+  random: () => number;
 }
 
-export function createApp({ db, migrationsApplied }: AppDeps) {
+export function createApp({ db, migrationsApplied, random }: AppDeps) {
   const app = new Hono();
 
   app.get("/api/health", (c) => c.json({ status: "ok", migrationsApplied }));
@@ -35,6 +42,7 @@ export function createApp({ db, migrationsApplied }: AppDeps) {
   app.route("/api/skins", skinRoutes(db));
   app.route("/api/maps", mapRoutes(db));
   app.route("/api/save", saveRoutes(db));
+  app.route("/api/battles", battleRoutes(db, random));
 
   // TODO: the rest of the game API — see docs/04-api-design.md §ゲーム API
   // TODO: /api/admin/*              — see docs/04-api-design.md §管理 API

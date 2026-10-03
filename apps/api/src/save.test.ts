@@ -1,32 +1,19 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
-import type { GameMap, Position, SaveData, TileKind } from "@mba/core";
+import type { SaveData } from "@mba/core";
 import { maps, saves } from "@mba/db";
 
 import { LOCAL_USER_ID } from "./auth.js";
-import { START_MAP_ID, starterMap } from "./maps.js";
-import { setup } from "./testing.js";
+import { START_MAP_ID } from "./maps.js";
+import { firstTile, setup, starter } from "./testing.js";
 import type { TestApp } from "./testing.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function starter(): GameMap {
-  const map = starterMap();
-  if (!map.ok) throw new Error(`the starter map is invalid: ${JSON.stringify(map.error)}`);
-  return map.value;
-}
-
 const MAP = starter();
-
-/** The first tile of a kind on the starter map, as a position. */
-function firstTile(kind: TileKind): Position {
-  const i = MAP.tiles.indexOf(kind);
-  if (i < 0) throw new Error(`the starter map has no ${kind}`);
-  return { x: i % MAP.width, y: Math.floor(i / MAP.width) };
-}
 
 /** Somewhere a player can stand that is not where they start. */
 const ON_GRASS = firstTile("grass");

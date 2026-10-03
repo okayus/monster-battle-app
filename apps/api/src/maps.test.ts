@@ -2,17 +2,11 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
 import { canStandOn, step } from "@mba/core";
-import type { Direction, GameMap, Position } from "@mba/core";
+import type { Direction, Position } from "@mba/core";
 import { maps } from "@mba/db";
 
-import { START_MAP_ID, ensureStarterMap, mapFromArt, starterMap } from "./maps.js";
-import { setup } from "./testing.js";
-
-function starter(): GameMap {
-  const map = starterMap();
-  if (!map.ok) throw new Error(`the starter map is invalid: ${JSON.stringify(map.error)}`);
-  return map.value;
-}
+import { START_MAP_ID, ensureStarterMap, mapFromArt } from "./maps.js";
+import { setup, starter } from "./testing.js";
 
 describe("the starter map", () => {
   it("is a complete grid", () => {
