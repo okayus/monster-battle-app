@@ -9,8 +9,9 @@ import {
   playTurn,
   startBattle,
   viewBattle,
+  wildCombatant,
 } from "./index.js";
-import type { BattleState, Combatant, Move, Species, TurnRolls } from "./index.js";
+import type { BattleState, Combatant, Move, OwnedMonster, Species, TurnRolls } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -36,7 +37,11 @@ function species(overrides: Partial<Species> = {}): Species {
 }
 
 function combatant(overrides: Partial<Combatant> = {}): Combatant {
-  return { ...combatantOf(species()), ...overrides };
+  return { ...wildCombatant(species()), ...overrides };
+}
+
+function owned(overrides: Partial<OwnedMonster> = {}): OwnedMonster {
+  return { id: "m1", species: species(), nickname: null, exp: 0, damage: 0, ...overrides };
 }
 
 /** Even stats on both sides, so the damage is just the move's power times the spread. */
@@ -130,23 +135,65 @@ describe("calcDamage", () => {
   });
 });
 
-describe("combatantOf", () => {
-  it("starts at full health with the species' stats", () => {
-    const fighter = combatantOf(species({ maxHp: 24, attack: 9, defense: 8 }));
-    expect(fighter).toMatchObject({ name: "テスト", hp: 24, maxHp: 24, attack: 9, defense: 8 });
-    expect(fighter.moves).toEqual([BUMP, BITE]);
-  });
-
-  it("goes by its nickname when it has one", () => {
-    expect(combatantOf(species(), "まる").name).toBe("まる");
-    expect(combatantOf(species(), null).name).toBe("テスト");
+describe("wildCombatant", () => {
+  it("starts at full health with the species' own numbers, at level 1", () => {
+    const fighter = wildCombatant(species({ maxHp: 24, attack: 9, defense: 8 }));
+    expect(fighter).toEqual({
+      name: "テスト",
+      skinId: "skin-test",
+      level: 1,
+      hp: 24,
+      maxHp: 24,
+      attack: 9,
+      defense: 8,
+      moves: [BUMP, BITE],
+    });
   });
 
   it("is a snapshot: editing the species afterwards does not reach it", () => {
     const kind = species();
-    const fighter = combatantOf(kind);
+    const fighter = wildCombatant(kind);
     kind.attack = 999;
     const first = kind.moves[0];
+    if (first === undefined) throw new Error("fixture has no moves");
+    first.power = 999;
+
+    expect(fighter.attack).toBe(10);
+    expect(fighter.moves[0]?.power).toBe(5);
+  });
+});
+
+describe("combatantOf", () => {
+  it("is the species at level 1 and full health, for a monster that has earned and lost nothing", () => {
+    expect(combatantOf(owned())).toEqual(wildCombatant(species()));
+  });
+
+  it("goes in grown to its level", () => {
+    // 40 experience is level 3: a fifth more of everything, rounded down.
+    const fighter = combatantOf(owned({ exp: 40 }));
+    expect(fighter).toMatchObject({ level: 3, maxHp: 24, hp: 24, attack: 12, defense: 12 });
+  });
+
+  it("goes in with the health it has left, not the health it could have", () => {
+    expect(combatantOf(owned({ damage: 7 }))).toMatchObject({ maxHp: 20, hp: 13 });
+    expect(combatantOf(owned({ exp: 40, damage: 7 }))).toMatchObject({ maxHp: 24, hp: 17 });
+  });
+
+  it("never goes in already fainted", () => {
+    expect(combatantOf(owned({ damage: 20 })).hp).toBe(1);
+    expect(combatantOf(owned({ damage: 999 })).hp).toBe(1);
+  });
+
+  it("goes by its nickname when it has one", () => {
+    expect(combatantOf(owned({ nickname: "まる" })).name).toBe("まる");
+    expect(combatantOf(owned({ nickname: null })).name).toBe("テスト");
+  });
+
+  it("is a snapshot: editing the species afterwards does not reach it", () => {
+    const monster = owned();
+    const fighter = combatantOf(monster);
+    monster.species.attack = 999;
+    const first = monster.species.moves[0];
     if (first === undefined) throw new Error("fixture has no moves");
     first.power = 999;
 
@@ -246,8 +293,8 @@ describe("playTurn", () => {
     for (let n = 0; n < 300; n++) {
       const stat = () => 1 + Math.floor(rand() * 30);
       let state = startBattle(
-        combatantOf(species({ maxHp: stat(), attack: stat(), defense: stat() })),
-        combatantOf(species({ maxHp: stat(), attack: stat(), defense: stat() })),
+        wildCombatant(species({ maxHp: stat(), attack: stat(), defense: stat() })),
+        wildCombatant(species({ maxHp: stat(), attack: stat(), defense: stat() })),
       );
 
       // Every hit does at least 1, so two monsters with at most 30 health each
@@ -350,7 +397,7 @@ describe("hasWildMonsters", () => {
 });
 
 describe("viewBattle", () => {
-  const state = evenBattle({}, { moves: [BUMP, BITE] });
+  const state = evenBattle({ level: 3 }, { moves: [BUMP, BITE] });
   const view = viewBattle("battle-1", state);
 
   it("carries what the screen draws", () => {
@@ -358,8 +405,15 @@ describe("viewBattle", () => {
       id: "battle-1",
       turn: 0,
       status: "ongoing",
-      player: { name: "こちら", skinId: "skin-test", hp: 20, maxHp: 20, moves: [BUMP, BITE] },
-      enemy: { name: "あいて", skinId: "skin-test", hp: 20, maxHp: 20 },
+      player: {
+        name: "こちら",
+        skinId: "skin-test",
+        level: 3,
+        hp: 20,
+        maxHp: 20,
+        moves: [BUMP, BITE],
+      },
+      enemy: { name: "あいて", skinId: "skin-test", level: 1, hp: 20, maxHp: 20 },
     });
   });
 
@@ -367,6 +421,6 @@ describe("viewBattle", () => {
     const sent = JSON.stringify(view);
     expect(sent).not.toContain("attack");
     expect(sent).not.toContain("defense");
-    expect(Object.keys(view.enemy).sort()).toEqual(["hp", "maxHp", "name", "skinId"]);
+    expect(Object.keys(view.enemy).sort()).toEqual(["hp", "level", "maxHp", "name", "skinId"]);
   });
 });

@@ -18,12 +18,11 @@ import { Hono } from "hono";
 
 import { canStandOn, exitAt } from "@mba/core";
 import type { SaveData } from "@mba/core";
-import { saves } from "@mba/db";
 import type { Db } from "@mba/db";
 
 import { getUserId } from "../auth.js";
 import { findMap } from "../maps.js";
-import { loadSave } from "../saves.js";
+import { loadSave, storeSave } from "../saves.js";
 
 export function travelRoutes(db: Db) {
   const routes = new Hono();
@@ -51,17 +50,7 @@ export function travelRoutes(db: Db) {
     }
 
     const arrived: SaveData = { mapId: far.id, position: exit.to.position };
-    const values = {
-      mapId: arrived.mapId,
-      x: arrived.position.x,
-      y: arrived.position.y,
-      updatedAt: new Date(),
-    };
-    db.insert(saves)
-      .values({ userId, ...values })
-      .onConflictDoUpdate({ target: saves.userId, set: values })
-      .run();
-
+    storeSave(db, userId, arrived, new Date());
     return c.json(arrived);
   });
 

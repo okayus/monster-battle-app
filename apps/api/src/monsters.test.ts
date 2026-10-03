@@ -54,6 +54,7 @@ describe("GET /api/monsters", () => {
         attack: moss.attack,
         defense: moss.defense,
         moves: moss.moves,
+        battleId: null,
       },
     ]);
   });

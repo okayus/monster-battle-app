@@ -384,9 +384,20 @@ export interface MonsterView {
   attack: number;
   defense: number;
   moves: Move[];
+  /**
+   * The battle this monster is in the middle of, or null. While there is one,
+   * the health above is what it went in with: what it has left is in the
+   * battle, and comes back here when the battle ends.
+   */
+  battleId: string | null;
 }
 
-export function viewMonster(monster: OwnedMonster): MonsterView {
+/** Fresh copies, so that what is handed out cannot be used to edit what it came from. */
+function copyMoves(moves: readonly Move[]): Move[] {
+  return moves.map((move) => ({ id: move.id, name: move.name, power: move.power }));
+}
+
+export function viewMonster(monster: OwnedMonster, battleId: string | null): MonsterView {
   const now = grown(monster);
   return {
     id: monster.id,
@@ -399,11 +410,8 @@ export function viewMonster(monster: OwnedMonster): MonsterView {
     maxHp: now.maxHp,
     attack: now.attack,
     defense: now.defense,
-    moves: monster.species.moves.map((move) => ({
-      id: move.id,
-      name: move.name,
-      power: move.power,
-    })),
+    moves: copyMoves(monster.species.moves),
+    battleId,
   };
 }
 
@@ -421,6 +429,8 @@ export function viewMonster(monster: OwnedMonster): MonsterView {
 export interface Combatant {
   name: string;
   skinId: string;
+  /** Shown beside the name. The numbers below are already the ones for this level. */
+  level: number;
   maxHp: number;
   hp: number;
   attack: number;
@@ -428,16 +438,36 @@ export interface Combatant {
   moves: Move[];
 }
 
-/** A fresh combatant at full health. */
-export function combatantOf(species: Species, nickname: string | null = null): Combatant {
+/** A wild monster: its species as it is at level 1, at full health. */
+export function wildCombatant(species: Species): Combatant {
   return {
-    name: nickname ?? species.name,
+    name: species.name,
     skinId: species.skinId,
+    level: 1,
     maxHp: species.maxHp,
     hp: species.maxHp,
     attack: species.attack,
     defense: species.defense,
-    moves: species.moves.map((move) => ({ id: move.id, name: move.name, power: move.power })),
+    moves: copyMoves(species.moves),
+  };
+}
+
+/**
+ * A player's monster as it goes into a battle: grown to its level, and with
+ * the health it has left — not the health it could have. What one battle
+ * took, the next one starts without.
+ */
+export function combatantOf(monster: OwnedMonster): Combatant {
+  const now = grown(monster);
+  return {
+    name: monster.nickname ?? monster.species.name,
+    skinId: monster.species.skinId,
+    level: now.level,
+    maxHp: now.maxHp,
+    hp: now.hp,
+    attack: now.attack,
+    defense: now.defense,
+    moves: copyMoves(monster.species.moves),
   };
 }
 
@@ -495,10 +525,18 @@ export interface TurnRolls {
   enemyVariance: number;
 }
 
-/** What happened during a turn, in order. The screen turns these into text. */
+/**
+ * What happened during a turn, in order. The screen turns these into text.
+ *
+ * The first two come out of the turn itself (`playTurn`). The last two come
+ * after a turn that won the battle, out of what the win left the player's
+ * monster with (`settle`).
+ */
 export type BattleEvent =
   | { kind: "attack"; by: Side; move: string; damage: number }
-  | { kind: "fainted"; who: Side };
+  | { kind: "fainted"; who: Side }
+  | { kind: "exp_gained"; amount: number }
+  | { kind: "level_up"; level: number };
 
 export type BattleError = { kind: "battle_over" } | { kind: "unknown_move"; moveId: string };
 
@@ -553,12 +591,78 @@ export function playTurn(
 }
 
 // ---------------------------------------------------------------------------
+// What a battle leaves behind
+// ---------------------------------------------------------------------------
+
+/**
+ * The experience a win is worth: more for an enemy that was sturdier and hit
+ * harder. Worked out from the numbers the enemy fought with — the snapshot in
+ * the battle — so no species has to say what beating it is worth, and an edit
+ * to the species halfway through a battle does not change what that battle
+ * pays.
+ */
+export function expFor(enemy: Pick<Combatant, "maxHp" | "attack" | "defense">): number {
+  const worth = Math.floor((enemy.maxHp + enemy.attack + enemy.defense) / 4);
+  // Written this way round so that NaN, too, comes out as 1.
+  return worth >= 1 ? worth : 1;
+}
+
+/** What a finished battle leaves its monster with, and what there is to tell the player. */
+export interface Settlement {
+  /** The two numbers to store. */
+  exp: number;
+  damage: number;
+  /** In the order they happened. Appended to the events of the turn that ended the battle. */
+  events: BattleEvent[];
+}
+
+/**
+ * What becomes of the player's monster when a battle is over. Undefined while
+ * the battle is still going: there is nothing to settle yet.
+ *
+ * Won: it earns experience, and keeps the damage it took. What it has left is
+ * what it starts its next battle with.
+ *
+ * Lost: it earns nothing, and is restored to full health. This is the only
+ * way health comes back. (Where the *player* ends up after losing is not a
+ * rule about monsters, and is decided by whoever calls this.)
+ *
+ * Pure, like `playTurn`: it returns the numbers to store and changes nothing.
+ * The caller writes them down in the same breath as the battle itself, so a
+ * battle cannot be over without having been settled, or settled twice.
+ */
+export function settle(
+  monster: Pick<OwnedMonster, "exp">,
+  state: BattleState,
+): Settlement | undefined {
+  if (state.status === "ongoing") return undefined;
+  if (state.status === "lost") return { exp: monster.exp, damage: 0, events: [] };
+
+  // Experience stops where the top level begins, so the stored number has a
+  // ceiling too. A win never takes any away, even from a monster that is
+  // somehow already past it.
+  const most = expToReach(GROWTH.maxLevel);
+  const exp = Math.max(monster.exp, Math.min(most, monster.exp + expFor(state.enemy)));
+
+  const events: BattleEvent[] = [];
+  if (exp > monster.exp) events.push({ kind: "exp_gained", amount: exp - monster.exp });
+  const level = levelOf(exp);
+  if (level > levelOf(monster.exp)) events.push({ kind: "level_up", level });
+
+  // The damage is counted against the health the monster went in with a
+  // maximum of. If the win took it up a level, that maximum has just grown,
+  // and the health it has left grows by as much.
+  return { exp, damage: state.player.maxHp - state.player.hp, events };
+}
+
+// ---------------------------------------------------------------------------
 // What the browser is shown
 // ---------------------------------------------------------------------------
 
 export interface CombatantView {
   name: string;
   skinId: string;
+  level: number;
   hp: number;
   maxHp: number;
 }
@@ -580,6 +684,7 @@ function viewCombatant(combatant: Combatant): CombatantView {
   return {
     name: combatant.name,
     skinId: combatant.skinId,
+    level: combatant.level,
     hp: combatant.hp,
     maxHp: combatant.maxHp,
   };
@@ -590,14 +695,7 @@ export function viewBattle(id: string, state: BattleState): BattleView {
     id,
     turn: state.turn,
     status: state.status,
-    player: {
-      ...viewCombatant(state.player),
-      moves: state.player.moves.map((move) => ({
-        id: move.id,
-        name: move.name,
-        power: move.power,
-      })),
-    },
+    player: { ...viewCombatant(state.player), moves: copyMoves(state.player.moves) },
     enemy: viewCombatant(state.enemy),
   };
 }

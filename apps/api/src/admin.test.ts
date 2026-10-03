@@ -87,6 +87,29 @@ async function startBattle(app: TestApp): Promise<BattleView> {
   return (await res.json()) as BattleView;
 }
 
+async function playTurn(app: TestApp, battle: BattleView, moveId: string): Promise<TurnOutcome> {
+  const res = await app.request(`/api/battles/${battle.id}/turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ moveId, turn: battle.turn }),
+  });
+  if (res.status !== 200) throw new Error(`turn ${battle.turn} was refused: ${res.status}`);
+  return (await res.json()) as TurnOutcome;
+}
+
+/**
+ * Plays a battle to its end. A monster is in one battle at a time, so a test
+ * that wants a second battle has to finish the first.
+ */
+async function playOut(app: TestApp, start: BattleView, moveId: string): Promise<BattleView> {
+  let battle = start;
+  // Every hit does at least 1, so this many turns outlasts any seeded monster.
+  for (let n = 0; n < 100 && battle.status === "ongoing"; n++) {
+    battle = (await playTurn(app, battle, moveId)).battle;
+  }
+  return battle;
+}
+
 // ---------------------------------------------------------------------------
 
 describe("the admin guard", () => {
@@ -232,9 +255,10 @@ describe("PUT /api/admin/species/:id", () => {
   });
 
   it("does not reach into a battle that has already started", async () => {
-    // The player's monster is a moss. Two battles against a drop, one started
-    // before moss is edited and one after.
-    const { app, db } = setup({ random: rolls(0, 1, 0, 0) });
+    // The player's monster is a moss. Two battles against a drop: one started
+    // before moss is edited, and the next one after. Every roll is 0, so a drop
+    // turns up both times and every hit is the weakest it can be.
+    const { app, db } = setup({ random: rolls(0) });
     await putSave(app, { mapId: START_MAP_ID, position: firstTile("grass") });
     const before = findSpecies(db, "moss");
     const wild = findSpecies(db, "drop");
@@ -246,23 +270,18 @@ describe("PUT /api/admin/species/:id", () => {
 
     const strong = { ...speciesInput(), name: before.name, attack: 999, moveIds: ["bite", "bump"] };
     expect((await send(app, "PUT", "/species/moss", strong)).status).toBe(200);
-    const later = await startBattle(app);
-
-    const play = async (battle: BattleView) => {
-      const res = await app.request(`/api/battles/${battle.id}/turn`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moveId: "bite", turn: 0 }),
-      });
-      return (await res.json()) as TurnOutcome;
-    };
 
     // The earlier battle still hits with the attack it started with…
-    const old = await play(earlier);
+    const old = await playTurn(app, earlier, "bite");
     expect(old.events[0]).toMatchObject({ damage: calcDamage(before, wild, bite, 0) });
     expect(old.battle.status).toBe("ongoing");
-    // …and the later one with the new attack, which ends it in one blow.
-    const fresh = await play(later);
+    // …all the way to its end, several turns later.
+    const ended = await playOut(app, old.battle, "bite");
+    expect(ended.status).toBe("won");
+    expect(ended.turn).toBeGreaterThan(2);
+
+    // The next one starts with the new attack, which ends it in one blow.
+    const fresh = await playTurn(app, await startBattle(app), "bite");
     expect(fresh.battle.status).toBe("won");
   });
 
@@ -434,6 +453,8 @@ describe("PUT /api/admin/moves/:id", () => {
 
     const still = (await (await app.request(`/api/battles/${before.id}`)).json()) as BattleView;
     expect(powerIn(still)).toBe(5);
+    // The next battle starts once this one is over, and has the new power.
+    expect((await playOut(app, still, "bite")).status).toBe("won");
     expect(powerIn(await startBattle(app))).toBe(9);
   });
 });

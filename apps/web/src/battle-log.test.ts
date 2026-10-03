@@ -20,4 +20,16 @@ describe("describeEvent", () => {
     );
     expect(describeEvent({ kind: "fainted", who: "player" }, names)).toBe("モリダマ は たおれた");
   });
+
+  it("says what a win was worth, to the player's monster", () => {
+    expect(describeEvent({ kind: "exp_gained", amount: 9 }, names)).toBe(
+      "モリダマ は 経験値を 9 手に入れた",
+    );
+  });
+
+  it("says which level the player's monster has reached", () => {
+    expect(describeEvent({ kind: "level_up", level: 2 }, names)).toBe(
+      "モリダマ は レベル 2 に上がった！",
+    );
+  });
 });

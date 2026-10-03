@@ -8,6 +8,9 @@
  * the two numbers that are stored (`viewMonster` in `@mba/core`). The browser
  * is not sent the stored numbers to do that sum itself, and there is nowhere
  * for it to send a level or a health back to.
+ *
+ * A monster in the middle of a battle says which one. Its health here is what
+ * it went in with; what it has left is in the battle until the battle ends.
  */
 
 import { Hono } from "hono";
@@ -17,6 +20,7 @@ import type { MonsterView } from "@mba/core";
 import type { Db } from "@mba/db";
 
 import { getUserId } from "../auth.js";
+import { ongoingBattleOf } from "../battles.js";
 import { monstersOf } from "../monsters.js";
 
 export function monsterRoutes(db: Db) {
@@ -24,7 +28,7 @@ export function monsterRoutes(db: Db) {
 
   routes.get("/", (c) => {
     const owned: MonsterView[] = monstersOf(db, getUserId(c)).map((monster) =>
-      viewMonster(monster),
+      viewMonster(monster, ongoingBattleOf(db, monster.id)?.id ?? null),
     );
     return c.json(owned);
   });

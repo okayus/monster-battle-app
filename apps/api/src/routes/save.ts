@@ -13,13 +13,12 @@ import { z } from "zod";
 
 import { canStandOn, canWalkTo } from "@mba/core";
 import type { SaveData } from "@mba/core";
-import { saves } from "@mba/db";
 import type { Db } from "@mba/db";
 
 import { getUserId } from "../auth.js";
 import { jsonBodyLimit, parseShape, readJson } from "../http.js";
 import { findMap } from "../maps.js";
-import { loadSave } from "../saves.js";
+import { loadSave, storeSave } from "../saves.js";
 
 /** A save is a few dozen bytes. Anything near this is not a save. */
 const MAX_SAVE_BYTES = 1024;
@@ -85,13 +84,9 @@ export function saveRoutes(db: Db) {
       return c.json({ error: { kind: "unreachable", mapId, position } }, 400);
     }
 
-    const values = { mapId, x: position.x, y: position.y, updatedAt: new Date() };
-    db.insert(saves)
-      .values({ userId: getUserId(c), ...values })
-      .onConflictDoUpdate({ target: saves.userId, set: values })
-      .run();
-
-    return c.json({ mapId, position } satisfies SaveData);
+    const stored: SaveData = { mapId, position };
+    storeSave(db, getUserId(c), stored, new Date());
+    return c.json(stored);
   });
 
   return routes;

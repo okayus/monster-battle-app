@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { GROWTH, expToReach, grown, levelOf, statAt, viewMonster } from "./index.js";
-import type { OwnedMonster, Species } from "./index.js";
+import {
+  GROWTH,
+  combatantOf,
+  expFor,
+  expToReach,
+  grown,
+  levelOf,
+  playTurn,
+  settle,
+  startBattle,
+  statAt,
+  viewMonster,
+  wildCombatant,
+} from "./index.js";
+import type { BattleState, Combatant, OwnedMonster, Species } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -163,7 +176,7 @@ describe("grown", () => {
 
 describe("viewMonster", () => {
   it("shows a monster by its species' name, with what it has grown into", () => {
-    expect(viewMonster(monster({ exp: 12, damage: 3 }))).toEqual({
+    expect(viewMonster(monster({ exp: 12, damage: 3 }), null)).toEqual({
       id: "m1",
       name: "モリダマ",
       skinId: "species-moss",
@@ -175,29 +188,231 @@ describe("viewMonster", () => {
       attack: 9,
       defense: 9,
       moves: MOSS.moves,
+      battleId: null,
     });
   });
 
+  it("says which battle the monster is in the middle of, when it is in one", () => {
+    expect(viewMonster(monster(), "battle-7").battleId).toBe("battle-7");
+  });
+
   it("shows it by its nickname when it has one", () => {
-    expect(viewMonster(monster({ nickname: "こけまる" })).name).toBe("こけまる");
+    expect(viewMonster(monster({ nickname: "こけまる" }), null).name).toBe("こけまる");
   });
 
   it("says there is no next level at the top", () => {
-    const top = viewMonster(monster({ exp: expToReach(GROWTH.maxLevel) }));
+    const top = viewMonster(monster({ exp: expToReach(GROWTH.maxLevel) }), null);
     expect(top.level).toBe(GROWTH.maxLevel);
     expect(top.nextLevelAt).toBeNull();
   });
 
   it("says where the next level begins one level below the top", () => {
-    const almost = viewMonster(monster({ exp: expToReach(GROWTH.maxLevel) - 1 }));
+    const almost = viewMonster(monster({ exp: expToReach(GROWTH.maxLevel) - 1 }), null);
     expect(almost.level).toBe(GROWTH.maxLevel - 1);
     expect(almost.nextLevelAt).toBe(expToReach(GROWTH.maxLevel));
   });
 
   it("hands out copies of the moves, not the species' own", () => {
-    const view = viewMonster(monster());
+    const view = viewMonster(monster(), null);
     expect(view.moves).toEqual(MOSS.moves);
     expect(view.moves).not.toBe(MOSS.moves);
     expect(view.moves[0]).not.toBe(MOSS.moves[0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What a battle leaves behind
+// ---------------------------------------------------------------------------
+
+/** A wild one that is worth 9: (20 + 10 + 8) / 4, rounded down. */
+const DROP: Species = {
+  id: "drop",
+  name: "ヌマダマ",
+  maxHp: 20,
+  attack: 10,
+  defense: 8,
+  skinId: "species-drop",
+  moves: [{ id: "bump", name: "ぶつかる", power: 5 }],
+};
+
+/** A battle that is over, with the player's monster left on `hp` out of what it went in with. */
+function finished(
+  status: "won" | "lost",
+  mine: OwnedMonster,
+  left: Partial<Combatant> = {},
+  enemy: Partial<Combatant> = {},
+): BattleState {
+  const state = startBattle(combatantOf(mine), wildCombatant(DROP));
+  return {
+    ...state,
+    turn: 4,
+    status,
+    player: { ...state.player, ...(status === "lost" ? { hp: 0 } : {}), ...left },
+    enemy: { ...state.enemy, ...(status === "won" ? { hp: 0 } : {}), ...enemy },
+  };
+}
+
+describe("expFor", () => {
+  it("is a quarter of the enemy's three numbers put together, rounded down", () => {
+    expect(expFor({ maxHp: 20, attack: 10, defense: 8 })).toBe(9); // 38 / 4
+    expect(expFor({ maxHp: 24, attack: 9, defense: 9 })).toBe(10); // 42 / 4
+    expect(expFor({ maxHp: 28, attack: 8, defense: 12 })).toBe(12);
+  });
+
+  it("is more for an enemy that is sturdier or hits harder", () => {
+    const base = expFor({ maxHp: 20, attack: 10, defense: 8 });
+    expect(expFor({ maxHp: 40, attack: 10, defense: 8 })).toBeGreaterThan(base);
+    expect(expFor({ maxHp: 20, attack: 30, defense: 8 })).toBeGreaterThan(base);
+    expect(expFor({ maxHp: 20, attack: 10, defense: 28 })).toBeGreaterThan(base);
+  });
+
+  it("is at least 1, so that a win is always worth something", () => {
+    expect(expFor({ maxHp: 1, attack: 1, defense: 1 })).toBe(1);
+    expect(expFor({ maxHp: 0, attack: 0, defense: 0 })).toBe(1);
+    expect(expFor({ maxHp: Number.NaN, attack: 1, defense: 1 })).toBe(1);
+  });
+
+  it("goes by the numbers the enemy fought with, not by how much health it has left", () => {
+    const fresh = wildCombatant(DROP);
+    const beaten: Combatant = { ...fresh, hp: 0 };
+    expect(expFor(beaten)).toBe(expFor(fresh));
+  });
+});
+
+describe("settle", () => {
+  it("has nothing to say while the battle is still going", () => {
+    const state = startBattle(combatantOf(monster()), wildCombatant(DROP));
+    expect(settle(monster(), state)).toBeUndefined();
+  });
+
+  describe("a win", () => {
+    it("adds what the enemy was worth to the monster's experience", () => {
+      const mine = monster({ exp: 3 });
+      const settled = settle(mine, finished("won", mine, { hp: 15 }));
+      expect(settled?.exp).toBe(12);
+    });
+
+    it("keeps the damage: what the monster has left is what it takes into its next battle", () => {
+      const mine = monster();
+      const settled = settle(mine, finished("won", mine, { hp: 15 }));
+      expect(settled?.damage).toBe(9);
+      expect(grown({ ...mine, ...settled }).hp).toBe(15);
+    });
+
+    it("adds to the damage a monster went in with, and does not start the count again", () => {
+      // In on 18 of 24, out on 11: 13 lost in all.
+      const mine = monster({ damage: 6 });
+      const settled = settle(mine, finished("won", mine, { hp: 11 }));
+      expect(settled?.damage).toBe(13);
+    });
+
+    it("leaves no damage after a win without a scratch", () => {
+      const mine = monster();
+      expect(settle(mine, finished("won", mine))?.damage).toBe(0);
+    });
+
+    it("reports the experience, and no level when it did not change", () => {
+      const mine = monster();
+      expect(settle(mine, finished("won", mine))?.events).toEqual([
+        { kind: "exp_gained", amount: 9 },
+      ]);
+    });
+
+    it("reports the new level, after the experience that brought it", () => {
+      const mine = monster({ exp: 5 });
+      const settled = settle(mine, finished("won", mine, { hp: 15 }));
+      expect(settled?.exp).toBe(14);
+      expect(settled?.events).toEqual([
+        { kind: "exp_gained", amount: 9 },
+        { kind: "level_up", level: 2 },
+      ]);
+    });
+
+    it("reports the level it ends on, when one win is worth several", () => {
+      const mine = monster();
+      const giant = { maxHp: 999, attack: 999, defense: 999 };
+      const settled = settle(mine, finished("won", mine, {}, giant));
+      expect(settled?.exp).toBe(749);
+      expect(settled?.events).toEqual([
+        { kind: "exp_gained", amount: 749 },
+        { kind: "level_up", level: levelOf(749) },
+      ]);
+    });
+
+    it("gives the monster, on levelling up, the health its maximum gained", () => {
+      const mine = monster({ exp: 5 });
+      const settled = settle(mine, finished("won", mine, { hp: 15 }));
+      // 9 lost at level 1 (24 at most). At level 2 the most is 26, so 17 are left.
+      expect(grown({ ...mine, ...settled })).toMatchObject({ level: 2, maxHp: 26, hp: 17 });
+    });
+
+    it("pays what the enemy was when the battle began: the snapshot, not the species", () => {
+      const mine = monster();
+      const state = finished("won", mine);
+      DROP.maxHp = 999;
+      try {
+        expect(settle(mine, state)?.exp).toBe(9);
+      } finally {
+        DROP.maxHp = 20;
+      }
+    });
+
+    it("stops the experience where the top level begins, and then has nothing to report", () => {
+      const most = expToReach(GROWTH.maxLevel);
+      const nearly = monster({ exp: most - 4 });
+      expect(settle(nearly, finished("won", nearly))).toMatchObject({
+        exp: most,
+        events: [
+          { kind: "exp_gained", amount: 4 },
+          { kind: "level_up", level: GROWTH.maxLevel },
+        ],
+      });
+
+      const there = monster({ exp: most });
+      expect(settle(there, finished("won", there))).toMatchObject({ exp: most, events: [] });
+    });
+
+    it("never takes experience away, even from a monster that is somehow past the top", () => {
+      const beyond = monster({ exp: expToReach(GROWTH.maxLevel) + 500 });
+      expect(settle(beyond, finished("won", beyond))?.exp).toBe(beyond.exp);
+    });
+  });
+
+  describe("a loss", () => {
+    it("earns nothing, and has nothing to report", () => {
+      const mine = monster({ exp: 7 });
+      expect(settle(mine, finished("lost", mine))).toMatchObject({ exp: 7, events: [] });
+    });
+
+    it("restores the monster to full health, whatever it went in with", () => {
+      const mine = monster({ exp: 40, damage: 20 });
+      const settled = settle(mine, finished("lost", mine));
+      expect(settled?.damage).toBe(0);
+      expect(grown({ ...mine, ...settled })).toMatchObject({ maxHp: 28, hp: 28 });
+    });
+  });
+
+  it("changes nothing it was given", () => {
+    const mine = Object.freeze(monster({ exp: 5 }));
+    const state = finished("won", mine, { hp: 15 });
+    const before = JSON.stringify(state);
+    settle(mine, state);
+    expect(JSON.stringify(state)).toBe(before);
+  });
+
+  it("settles a battle as it was actually played, turn by turn", () => {
+    const mine = monster();
+    let state = startBattle(combatantOf(mine), wildCombatant(DROP));
+    for (let turn = 0; turn < 50 && state.status === "ongoing"; turn++) {
+      const result = playTurn(state, "bite", { playerVariance: 1, enemyMove: 0, enemyVariance: 0 });
+      if (!result.ok) throw new Error("the turn was refused");
+      state = result.value.state;
+    }
+    expect(state.status).toBe("won");
+
+    const settled = settle(mine, state);
+    expect(settled?.exp).toBe(9);
+    expect(settled?.damage).toBe(24 - state.player.hp);
+    expect(settled?.damage).toBeGreaterThan(0);
   });
 });

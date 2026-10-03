@@ -99,11 +99,18 @@ describe("POST /api/battles", () => {
       player: {
         name: mine.name,
         skinId: mine.skinId,
+        level: 1,
         hp: mine.maxHp,
         maxHp: mine.maxHp,
         moves: mine.moves,
       },
-      enemy: { name: wild.name, skinId: wild.skinId, hp: wild.maxHp, maxHp: wild.maxHp },
+      enemy: {
+        name: wild.name,
+        skinId: wild.skinId,
+        level: 1,
+        hp: wild.maxHp,
+        maxHp: wild.maxHp,
+      },
     });
   });
 
