@@ -12,6 +12,7 @@ import {
   packFrame,
   parseAppearance,
   parseSkin,
+  skinsNamedBy,
   toRenderable,
 } from "./index.js";
 import type {
@@ -852,6 +853,17 @@ const PALETTE_B: PaletteEntry[] = [
   { id: "skin", hex: "#c68642" },
   { id: "shirt", hex: "#ffffff" },
 ];
+
+describe("skinsNamedBy", () => {
+  it("names the worn skin alone when nothing is swapped", () => {
+    expect(skinsNamedBy({ skinId: "a", parts: {} })).toEqual(["a"]);
+  });
+
+  it("names each skin once, however many slots are taken from it, worn skin first", () => {
+    const parts = { hair: "b", shoes: "b", shirt: "c" };
+    expect(skinsNamedBy({ skinId: "a", parts })).toEqual(["a", "c", "b"]);
+  });
+});
 
 describe("composeAppearance", () => {
   const a = drawnSkin(1, PALETTE_A, 2);

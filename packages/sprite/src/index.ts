@@ -595,6 +595,16 @@ export function parseAppearance(input: unknown): Result<Appearance, AppearanceEr
   return ok({ skinId, parts, colours });
 }
 
+/** The skins a recipe names, each once: the worn one first, then the parts' in draw order. */
+export function skinsNamedBy(appearance: Pick<Appearance, "skinId" | "parts">): string[] {
+  const ids = [appearance.skinId];
+  for (const slot of PART_SLOTS) {
+    const from = appearance.parts[slot];
+    if (from !== undefined && !ids.includes(from)) ids.push(from);
+  }
+  return ids;
+}
+
 /**
  * Puts a look together: every slot from the worn skin, except the slots the
  * recipe takes from another.
