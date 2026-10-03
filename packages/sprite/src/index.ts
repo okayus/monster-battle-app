@@ -476,3 +476,37 @@ export function toRenderable(skin: Skin): RenderableSkin {
     })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Playback — which frame is on screen at a given time
+// ---------------------------------------------------------------------------
+
+/**
+ * The index of the frame that is showing `elapsedMs` after a looping timeline
+ * started.
+ *
+ * Takes anything with a `durationMs`, so it serves the editable frames and the
+ * render-ready ones alike. Pure on purpose: the clock belongs to whoever is
+ * drawing, and this only answers "given that time, which frame".
+ *
+ * Total for any input: an empty timeline, or one whose durations add up to
+ * nothing, answers 0, and so does a time that is not a number.
+ */
+export function frameAt(
+  frames: ReadonlyArray<{ readonly durationMs: number }>,
+  elapsedMs: number,
+): number {
+  let total = 0;
+  for (const frame of frames) total += Math.max(0, frame.durationMs);
+  if (total <= 0 || !Number.isFinite(elapsedMs)) return 0;
+
+  // Wrapped into [0, total), for times before the start as well as after it.
+  let remaining = ((elapsedMs % total) + total) % total;
+  for (let i = 0; i < frames.length; i++) {
+    const duration = Math.max(0, frames[i]?.durationMs ?? 0);
+    if (remaining < duration) return i;
+    remaining -= duration;
+  }
+  // Only floating-point dust gets here; the end of the loop is the last frame.
+  return frames.length - 1;
+}

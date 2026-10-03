@@ -157,6 +157,38 @@ function markupOf(skin: RenderableSkin, frame?: number): string {
   return renderToStaticMarkup(<Sprite skin={skin} frame={frame} />);
 }
 
+/**
+ * Two parts that animate on different clocks. The body flips every 100 ms
+ * between a rect at x=0 and one at x=1; the hair holds each of its two frames
+ * for 300 ms, at x=10 and x=11.
+ */
+const TWO_CLOCKS: RenderableSkin = {
+  formatVersion: 1,
+  palette: [{ id: "skin", hex: "#e8b98a" }],
+  parts: [
+    {
+      slot: "body",
+      frames: [
+        { durationMs: 100, rects: [[0, 0, 1, 1, 1]] },
+        { durationMs: 100, rects: [[1, 0, 1, 1, 1]] },
+      ],
+    },
+    {
+      slot: "hair",
+      frames: [
+        { durationMs: 300, rects: [[10, 0, 1, 1, 1]] },
+        { durationMs: 300, rects: [[11, 0, 1, 1, 1]] },
+      ],
+    },
+  ],
+};
+
+/** The x of each rect drawn, in part order. */
+function xsAt(elapsedMs: number): string[] {
+  const markup = renderToStaticMarkup(<Sprite skin={TWO_CLOCKS} elapsedMs={elapsedMs} />);
+  return [...markup.matchAll(/<rect x="(\d+)"/g)].map((m) => m[1] ?? "");
+}
+
 // ---------------------------------------------------------------------------
 
 describe("Sprite", () => {
@@ -225,5 +257,24 @@ describe("Sprite", () => {
       parts: [{ slot: "body", frames: [] }],
     };
     expect(markupOf(empty)).not.toContain("<rect");
+  });
+
+  it("plays each part on its own clock when it is given a time", () => {
+    expect(xsAt(0)).toEqual(["0", "10"]);
+    expect(xsAt(100)).toEqual(["1", "10"]);
+    expect(xsAt(200)).toEqual(["0", "10"]);
+    expect(xsAt(300)).toEqual(["1", "11"]);
+    // Both loops have come back round: the body every 200 ms, the hair every 600.
+    expect(xsAt(600)).toEqual(["0", "10"]);
+  });
+
+  it("prefers the time over the frame number when it has both", () => {
+    const byTime = renderToStaticMarkup(<Sprite skin={TWO_CLOCKS} frame={0} elapsedMs={100} />);
+    expect([...byTime.matchAll(/<rect x="(\d+)"/g)].map((m) => m[1])).toEqual(["1", "10"]);
+  });
+
+  it("still goes by the frame number when there is no time", () => {
+    const byFrame = renderToStaticMarkup(<Sprite skin={TWO_CLOCKS} frame={1} />);
+    expect([...byFrame.matchAll(/<rect x="(\d+)"/g)].map((m) => m[1])).toEqual(["1", "11"]);
   });
 });

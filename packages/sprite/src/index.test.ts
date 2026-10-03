@@ -5,6 +5,7 @@ import {
   PART_SLOTS,
   SKIN_SPEC,
   expandFrame,
+  frameAt,
   packFrame,
   parseSkin,
   toRenderable,
@@ -521,5 +522,66 @@ describe("parseSkin", () => {
     const skin = accepted(input);
     expect(skin.parts).toHaveLength(PART_SLOTS.length);
     expect(skin.parts[0]?.frames).toHaveLength(SKIN_SPEC.maxFramesPerPart);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Playback
+// ---------------------------------------------------------------------------
+
+describe("frameAt", () => {
+  const timeline = [{ durationMs: 100 }, { durationMs: 50 }, { durationMs: 200 }];
+
+  it.each([
+    [0, 0],
+    [99, 0],
+    [100, 1],
+    [149, 1],
+    [150, 2],
+    [349, 2],
+  ])("shows each frame for as long as it lasts (%i ms)", (elapsedMs, frame) => {
+    expect(frameAt(timeline, elapsedMs)).toBe(frame);
+  });
+
+  it("loops back to the first frame when the timeline runs out", () => {
+    expect(frameAt(timeline, 350)).toBe(0);
+    expect(frameAt(timeline, 350 + 120)).toBe(1);
+    expect(frameAt(timeline, 350 * 1000 + 160)).toBe(2);
+  });
+
+  it("stays on the only frame of a still image", () => {
+    for (const elapsedMs of [0, 1, 119, 120, 5_000]) {
+      expect(frameAt([{ durationMs: 120 }], elapsedMs)).toBe(0);
+    }
+  });
+
+  it("gives every frame time on screen in proportion to its duration", () => {
+    const shown = [0, 0, 0];
+    for (let elapsedMs = 0; elapsedMs < 3500; elapsedMs++) {
+      const frame = frameAt(timeline, elapsedMs);
+      shown[frame] = (shown[frame] ?? 0) + 1;
+    }
+    expect(shown).toEqual([1000, 500, 2000]);
+  });
+
+  it("wraps a time from before the start the same way", () => {
+    // 10 ms before the start is 10 ms before the end of the loop.
+    expect(frameAt(timeline, -10)).toBe(2);
+    expect(frameAt(timeline, -350)).toBe(0);
+  });
+
+  it.each([
+    ["no frames", [], 500],
+    ["durations that add up to nothing", [{ durationMs: 0 }, { durationMs: 0 }], 500],
+    ["a time that is not a number", timeline, Number.NaN],
+    ["a time that never arrives", timeline, Number.POSITIVE_INFINITY],
+  ])("answers 0 for %s", (_label, frames, elapsedMs) => {
+    expect(frameAt(frames, elapsedMs)).toBe(0);
+  });
+
+  it("skips a frame that lasts no time at all", () => {
+    const withGap = [{ durationMs: 100 }, { durationMs: 0 }, { durationMs: 100 }];
+    expect(frameAt(withGap, 99)).toBe(0);
+    expect(frameAt(withGap, 100)).toBe(2);
   });
 });

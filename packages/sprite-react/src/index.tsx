@@ -10,6 +10,9 @@
  * injects markup, which is why user-authored skins are safe to display.
  */
 
+import { useEffect, useState } from "react";
+
+import { frameAt } from "@mba/sprite";
 import type { PaletteEntry, RenderableSkin } from "@mba/sprite";
 
 function fillOf(palette: PaletteEntry[], index: number): string {
@@ -24,12 +27,42 @@ export interface SpriteProps {
   skin: RenderableSkin;
   /** Animation frame. Each part wraps around its own frame count. */
   frame?: number;
+  /**
+   * Time since the animation started, in milliseconds. When given, each part
+   * shows the frame its own timeline has reached by then (every frame carries
+   * its own duration), and `frame` is ignored.
+   *
+   * A number rather than a "playing" switch: the clock stays with the caller,
+   * so the same component can be played, paused on a frame, or rendered on a
+   * server, where there is no clock at all.
+   */
+  elapsedMs?: number;
   className?: string;
   /** Canvas size in user units. Must match what the skin was authored at. */
   size?: number;
 }
 
-export function Sprite({ skin, frame = 0, className, size = 16 }: SpriteProps) {
+/**
+ * Milliseconds since `playing` turned true, refreshed about every `tickMs`.
+ * Zero while it is false. Pass the result to `<Sprite elapsedMs>`.
+ */
+export function useElapsedMs(playing: boolean, tickMs = 50): number {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!playing) return;
+    const start = performance.now();
+    const timer = setInterval(() => setElapsed(performance.now() - start), tickMs);
+    return () => {
+      clearInterval(timer);
+      setElapsed(0);
+    };
+  }, [playing, tickMs]);
+
+  return playing ? elapsed : 0;
+}
+
+export function Sprite({ skin, frame = 0, elapsedMs, className, size = 16 }: SpriteProps) {
   return (
     <svg
       className={className}
@@ -42,7 +75,8 @@ export function Sprite({ skin, frame = 0, className, size = 16 }: SpriteProps) {
       {skin.parts.map((part) => {
         const frames = part.frames;
         if (frames.length === 0) return null;
-        const current = frames[frame % frames.length];
+        const current =
+          frames[elapsedMs === undefined ? frame % frames.length : frameAt(frames, elapsedMs)];
         if (!current) return null;
         return (
           <g key={part.slot} data-part={part.slot}>
