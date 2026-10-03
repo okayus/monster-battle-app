@@ -430,3 +430,149 @@ export interface TurnOutcome {
   battle: BattleView;
   events: BattleEvent[];
 }
+
+// ---------------------------------------------------------------------------
+// Master data rules
+//
+// What the admin API asks before it stores a species or a map. The split is
+// the one docs/04-api-design.md draws: whether a field is a number at all is
+// a question of shape, answered by the API with a schema; whether that number
+// makes sense in the game is a rule, and the rules are here, where the admin
+// screen can read the same limits it is about to be held to.
+// ---------------------------------------------------------------------------
+
+/** True for a name with something in it and no more than `max` characters. */
+function isName(name: string, max: number): boolean {
+  return name.trim().length > 0 && name.length <= max;
+}
+
+function isIntBetween(value: number, min: number, max: number): boolean {
+  return Number.isInteger(value) && value >= min && value <= max;
+}
+
+export const SPECIES_LIMITS = {
+  maxNameLength: 32,
+  /** Upper bound for max HP, attack and defense. The lower bound is 1. */
+  maxStat: 999,
+  maxMoves: 4,
+} as const;
+
+/** What an admin submits for a species. Moves and the skin are named by id. */
+export interface SpeciesInput {
+  name: string;
+  maxHp: number;
+  attack: number;
+  defense: number;
+  skinId: string;
+  moveIds: string[];
+}
+
+export type SpeciesError =
+  | { kind: "bad_name" }
+  | { kind: "bad_stat"; stat: "maxHp" | "attack" | "defense"; value: number }
+  /** A species needs at least one move, or it has no turn to take. */
+  | { kind: "bad_move_count"; got: number }
+  | { kind: "duplicate_move"; moveId: string };
+
+/**
+ * The rules a species has to satisfy. Whether its skin and moves exist is not
+ * decided here: that depends on what is in the database, which this package
+ * cannot see.
+ */
+export function checkSpecies(input: SpeciesInput): Result<SpeciesInput, SpeciesError> {
+  if (!isName(input.name, SPECIES_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
+
+  for (const stat of ["maxHp", "attack", "defense"] as const) {
+    // A stat of zero is not a weak monster, it is a broken one: zero health
+    // has already fainted, and zero defense divides by zero.
+    if (!isIntBetween(input[stat], 1, SPECIES_LIMITS.maxStat)) {
+      return err({ kind: "bad_stat", stat, value: input[stat] });
+    }
+  }
+
+  if (input.moveIds.length < 1 || input.moveIds.length > SPECIES_LIMITS.maxMoves) {
+    return err({ kind: "bad_move_count", got: input.moveIds.length });
+  }
+  const seen = new Set<string>();
+  for (const moveId of input.moveIds) {
+    if (seen.has(moveId)) return err({ kind: "duplicate_move", moveId });
+    seen.add(moveId);
+  }
+  return ok(input);
+}
+
+export const MAP_LIMITS = {
+  maxNameLength: 32,
+  maxWidth: 32,
+  maxHeight: 32,
+  /** Upper bound for an encounter weight. The lower bound is 1. */
+  maxWeight: 100,
+} as const;
+
+/** One line of "who turns up on this map": a species and its weight. */
+export interface Encounter {
+  speciesId: string;
+  weight: number;
+}
+
+/** What an admin submits for a map. */
+export interface MapInput {
+  name: string;
+  width: number;
+  height: number;
+  tiles: TileKind[];
+  spawn: Position;
+  encounters: Encounter[];
+}
+
+/** A map as the admin screen edits it: the grid, and who turns up on it. */
+export interface AdminMap extends GameMap {
+  encounters: Encounter[];
+}
+
+export type MapError =
+  | { kind: "bad_name" }
+  | { kind: "bad_size"; width: number; height: number }
+  | { kind: "bad_tile_count"; got: number; expected: number }
+  /** The spawn has to be a tile a player can stand on, or a new game starts stuck. */
+  | { kind: "bad_spawn"; spawn: Position }
+  | { kind: "bad_weight"; speciesId: string; weight: number }
+  | { kind: "duplicate_encounter"; speciesId: string };
+
+/**
+ * The rules a map has to satisfy. As with species, whether the species it
+ * names exist is left to the caller.
+ */
+export function checkMap(input: MapInput): Result<MapInput, MapError> {
+  if (!isName(input.name, MAP_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
+
+  const { width, height } = input;
+  if (
+    !isIntBetween(width, 1, MAP_LIMITS.maxWidth) ||
+    !isIntBetween(height, 1, MAP_LIMITS.maxHeight)
+  ) {
+    return err({ kind: "bad_size", width, height });
+  }
+  if (input.tiles.length !== width * height) {
+    return err({ kind: "bad_tile_count", got: input.tiles.length, expected: width * height });
+  }
+  if (!canStandOn(input, input.spawn)) return err({ kind: "bad_spawn", spawn: input.spawn });
+
+  const seen = new Set<string>();
+  for (const { speciesId, weight } of input.encounters) {
+    if (!isIntBetween(weight, 1, MAP_LIMITS.maxWeight)) {
+      return err({ kind: "bad_weight", speciesId, weight });
+    }
+    if (seen.has(speciesId)) return err({ kind: "duplicate_encounter", speciesId });
+    seen.add(speciesId);
+  }
+  return ok(input);
+}
+
+/** A skin, as much of it as a list needs: enough to name it and say whose it is. */
+export interface SkinSummary {
+  id: string;
+  name: string;
+  /** Null for the skins that ship with the game. */
+  ownerId: string | null;
+}
