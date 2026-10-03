@@ -478,6 +478,205 @@ export function toRenderable(skin: Skin): RenderableSkin {
 }
 
 // ---------------------------------------------------------------------------
+// Appearances — how skins are worn
+// ---------------------------------------------------------------------------
+
+/**
+ * What a character looks like, as a recipe over skins that already exist:
+ * which skin is worn, which slots are taken from another skin instead, and
+ * which colours are worn in place of the drawn ones.
+ *
+ * It holds identifiers and colours and nothing else. Dyeing the hair adds one
+ * entry here; no skin is copied, and no drawing is stored a second time
+ * (docs/03-data-model.md).
+ */
+export interface Appearance {
+  /** The skin that is worn. Every slot comes from it unless `parts` says otherwise. */
+  skinId: string;
+  /** Slots drawn from another skin instead: slot → that skin's id. */
+  parts: Partial<Record<PartSlot, string>>;
+  /**
+   * Colours worn in place of the drawn ones — a small palette laid over the
+   * skins' own. An id here is a role ("hair"), not a place in one skin's
+   * palette: it recolours every part of the look that was painted with that
+   * id, whichever skin the part came from.
+   *
+   * A list of entries rather than an object keyed by id, like a skin's
+   * palette. Ids are chosen by users, and "constructor" is a valid one; on an
+   * object it would be found on every lookup, set or not.
+   */
+  colours: PaletteEntry[];
+}
+
+export const APPEARANCE_SPEC = {
+  /** As many colours as a single skin can have. */
+  maxColours: SKIN_SPEC.maxPaletteEntries,
+  /** Skin ids are the server's own. This only bounds the string that is looked up. */
+  maxSkinIdLength: 64,
+} as const;
+
+export type AppearanceError =
+  /** Wrong type or wrong shape. `at` is a path into the input, as in `SkinError`. */
+  | { kind: "malformed"; at: string }
+  | { kind: "too_many"; what: string; got: number; max: number }
+  | { kind: "bad_palette_id"; id: string }
+  | { kind: "duplicate_palette_id"; id: string }
+  | { kind: "bad_hex"; hex: string };
+
+function isSkinId(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length > 0 && value.length <= APPEARANCE_SPEC.maxSkinIdLength
+  );
+}
+
+/**
+ * Validates untrusted input and returns an Appearance. The second trust
+ * boundary in this package, and it is here for the same reason as the first:
+ * a colour's id becomes the name of a CSS custom property and its hex becomes
+ * that property's value, so both are held to exactly the patterns a skin's
+ * palette is held to.
+ *
+ * What this cannot decide is whether the skins it names exist, or whether the
+ * look has the colours it recolours. Both depend on what is stored, and are
+ * the caller's to check.
+ *
+ * As with `parseSkin`, the result is rebuilt field by field, so nothing the
+ * validator did not look at can ride along into storage.
+ */
+export function parseAppearance(input: unknown): Result<Appearance, AppearanceError> {
+  if (!isObject(input)) return err({ kind: "malformed", at: "$" });
+
+  const skinId = input.skinId;
+  if (!isSkinId(skinId)) return err({ kind: "malformed", at: "$.skinId" });
+
+  const rawParts = input.parts;
+  if (!isObject(rawParts)) return err({ kind: "malformed", at: "$.parts" });
+  for (const key of Object.keys(rawParts)) {
+    if (!PART_SLOT_SET.has(key)) return err({ kind: "malformed", at: "$.parts" });
+  }
+  const parts: Partial<Record<PartSlot, string>> = {};
+  for (const slot of PART_SLOTS) {
+    const from = rawParts[slot];
+    if (from === undefined) continue;
+    if (!isSkinId(from)) return err({ kind: "malformed", at: `$.parts.${slot}` });
+    // "The hair of the skin that is worn anyway" says nothing, so it is not
+    // kept: one look has one way of being written down.
+    if (from !== skinId) parts[slot] = from;
+  }
+
+  const rawColours = input.colours;
+  if (!Array.isArray(rawColours)) return err({ kind: "malformed", at: "$.colours" });
+  if (rawColours.length > APPEARANCE_SPEC.maxColours) {
+    return err({
+      kind: "too_many",
+      what: "colours",
+      got: rawColours.length,
+      max: APPEARANCE_SPEC.maxColours,
+    });
+  }
+  const colours: PaletteEntry[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < rawColours.length; i++) {
+    const entry: unknown = rawColours[i];
+    if (!isObject(entry)) return err({ kind: "malformed", at: `$.colours[${i}]` });
+
+    const { id, hex } = entry;
+    if (typeof id !== "string") return err({ kind: "malformed", at: `$.colours[${i}].id` });
+    if (!SKIN_SPEC.paletteIdPattern.test(id)) return err({ kind: "bad_palette_id", id });
+    if (seen.has(id)) return err({ kind: "duplicate_palette_id", id });
+
+    if (typeof hex !== "string") return err({ kind: "malformed", at: `$.colours[${i}].hex` });
+    if (!SKIN_SPEC.hexPattern.test(hex)) return err({ kind: "bad_hex", hex });
+
+    seen.add(id);
+    colours.push({ id, hex });
+  }
+
+  return ok({ skinId, parts, colours });
+}
+
+/**
+ * Puts a look together: every slot from the worn skin, except the slots the
+ * recipe takes from another.
+ *
+ * The result is an ordinary RenderableSkin, so whatever draws a skin draws a
+ * look. Each part keeps its own frames and timings. The palettes of the skins
+ * that contribute are laid end to end and the parts' colour numbers shifted to
+ * match — which means the same id can appear twice, once per skin, each with
+ * the colour that skin was drawn in.
+ *
+ * The recipe's colours are not applied here. They stay CSS variables, set
+ * wherever the look is drawn, which is why a recolour never touches data.
+ *
+ * `skins` holds the render-ready form of the skins the recipe names. A slot
+ * whose skin is missing falls back to the worn skin's own part. If the worn
+ * skin itself is missing there is nothing to draw, and the answer is undefined.
+ */
+export function composeAppearance(
+  appearance: Pick<Appearance, "skinId" | "parts">,
+  skins: ReadonlyMap<string, RenderableSkin>,
+): RenderableSkin | undefined {
+  const worn = skins.get(appearance.skinId);
+  if (worn === undefined) return undefined;
+
+  const palette: PaletteEntry[] = [];
+  /** Where each contributing skin's palette starts in the combined one. */
+  const offsets = new Map<RenderableSkin, number>();
+  const parts: RenderableSkin["parts"] = [];
+
+  // PART_SLOTS order, back to front: the draw order is part of the format, not
+  // something a recipe gets to choose.
+  for (const slot of PART_SLOTS) {
+    const from = appearance.parts[slot];
+    const source = (from === undefined ? undefined : skins.get(from)) ?? worn;
+    const part = source.parts.find((candidate) => candidate.slot === slot);
+    if (part === undefined) continue;
+
+    let offset = offsets.get(source);
+    if (offset === undefined) {
+      offset = palette.length;
+      offsets.set(source, offset);
+      for (const entry of source.palette) palette.push({ id: entry.id, hex: entry.hex });
+    }
+    const shift = offset;
+    parts.push({
+      slot,
+      frames: part.frames.map((frame) => ({
+        durationMs: frame.durationMs,
+        rects: frame.rects.map(([x, y, w, h, index]): Rect => [x, y, w, h, index + shift]),
+      })),
+    });
+  }
+  return { formatVersion: 1, palette, parts };
+}
+
+/**
+ * The colours something is actually painted with, one entry per id: what a
+ * recolour can name, and what a screen can offer to recolour.
+ *
+ * A palette entry no cell uses is left out — recolouring it would change
+ * nothing. Where two skins in a look share an id, the first one's colour
+ * stands for it.
+ */
+export function coloursOf(skin: RenderableSkin): PaletteEntry[] {
+  const used = new Set<number>();
+  for (const part of skin.parts) {
+    for (const frame of part.frames) {
+      for (const rect of frame.rects) used.add(rect[4]);
+    }
+  }
+
+  const colours: PaletteEntry[] = [];
+  const seen = new Set<string>();
+  skin.palette.forEach((entry, i) => {
+    if (!used.has(i + 1) || seen.has(entry.id)) return;
+    seen.add(entry.id);
+    colours.push({ id: entry.id, hex: entry.hex });
+  });
+  return colours;
+}
+
+// ---------------------------------------------------------------------------
 // Playback — which frame is on screen at a given time
 // ---------------------------------------------------------------------------
 

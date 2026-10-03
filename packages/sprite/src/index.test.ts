@@ -1,16 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  APPEARANCE_SPEC,
   CELLS_PER_FRAME,
   PART_SLOTS,
   SKIN_SPEC,
+  coloursOf,
+  composeAppearance,
   expandFrame,
   frameAt,
   packFrame,
+  parseAppearance,
   parseSkin,
   toRenderable,
 } from "./index.js";
-import type { CellGrid, Frame, PartSlot, Rect, Skin, SkinError } from "./index.js";
+import type {
+  Appearance,
+  AppearanceError,
+  CellGrid,
+  Frame,
+  PaletteEntry,
+  PartSlot,
+  Rect,
+  RenderableSkin,
+  Skin,
+  SkinError,
+} from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -583,5 +598,414 @@ describe("frameAt", () => {
     const withGap = [{ durationMs: 100 }, { durationMs: 0 }, { durationMs: 100 }];
     expect(frameAt(withGap, 99)).toBe(0);
     expect(frameAt(withGap, 100)).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Appearances — the recipe, and what it puts together
+// ---------------------------------------------------------------------------
+
+/** A recipe as a screen would send it. */
+function validAppearance(): Record<string, unknown> {
+  return {
+    skinId: "skin-a",
+    parts: { hair: "skin-b" },
+    colours: [{ id: "hair", hex: "#cc3344" }],
+  };
+}
+
+function appearanceWith(patch: Record<string, unknown>): Record<string, unknown> {
+  return { ...validAppearance(), ...patch };
+}
+
+function appearanceRejection(input: unknown): AppearanceError {
+  const result = parseAppearance(input);
+  if (result.ok) {
+    throw new Error(`expected parseAppearance to reject, got ${JSON.stringify(result.value)}`);
+  }
+  return result.error;
+}
+
+function acceptedAppearance(input: unknown): Appearance {
+  const result = parseAppearance(input);
+  if (!result.ok) {
+    throw new Error(`expected parseAppearance to accept, got ${JSON.stringify(result.error)}`);
+  }
+  return result.value;
+}
+
+describe("parseAppearance", () => {
+  it("accepts a recipe and hands it back", () => {
+    expect(acceptedAppearance(validAppearance())).toEqual({
+      skinId: "skin-a",
+      parts: { hair: "skin-b" },
+      colours: [{ id: "hair", hex: "#cc3344" }],
+    });
+  });
+
+  it("accepts the plainest recipe there is: a skin, worn as drawn", () => {
+    expect(acceptedAppearance({ skinId: "skin-a", parts: {}, colours: [] })).toEqual({
+      skinId: "skin-a",
+      parts: {},
+      colours: [],
+    });
+  });
+
+  it("rebuilds the recipe, so unknown properties cannot ride along into storage", () => {
+    const hostile = {
+      ...validAppearance(),
+      userId: "someone-else",
+      colours: [{ id: "hair", hex: "#cc3344", onload: "alert(1)" }],
+    };
+    const serialized = JSON.stringify(acceptedAppearance(hostile));
+    expect(serialized).not.toContain("userId");
+    expect(serialized).not.toContain("onload");
+  });
+
+  it("writes the slots down in draw order however they arrived", () => {
+    const parts = { hair: "skin-b", body: "skin-c", shoes: "skin-d" };
+    expect(Object.keys(acceptedAppearance(appearanceWith({ parts })).parts)).toEqual([
+      "body",
+      "shoes",
+      "hair",
+    ]);
+  });
+
+  it("does not keep a slot that is taken from the skin that is worn anyway", () => {
+    const parts = { hair: "skin-a", shirt: "skin-b" };
+    expect(acceptedAppearance(appearanceWith({ parts })).parts).toEqual({ shirt: "skin-b" });
+  });
+
+  describe("rejects what is not a recipe at all", () => {
+    it.each([
+      ["null", null],
+      ["undefined", undefined],
+      ["an array", []],
+      ["a string", "skin-a"],
+      ["a number", 1],
+    ])("%s", (_label, input) => {
+      expect(appearanceRejection(input)).toEqual({ kind: "malformed", at: "$" });
+    });
+  });
+
+  describe("rejects a skin id that could not be one", () => {
+    it.each([
+      ["missing", undefined],
+      ["a number", 7],
+      ["empty", ""],
+      ["over the length an id can have", "s".repeat(APPEARANCE_SPEC.maxSkinIdLength + 1)],
+      ["an object", { id: "skin-a" }],
+    ])("worn skin: %s", (_label, skinId) => {
+      expect(appearanceRejection(appearanceWith({ skinId }))).toEqual({
+        kind: "malformed",
+        at: "$.skinId",
+      });
+    });
+
+    it.each([
+      ["a number", 7],
+      ["empty", ""],
+      ["over the length an id can have", "s".repeat(APPEARANCE_SPEC.maxSkinIdLength + 1)],
+      ["null", null],
+    ])("a part's skin: %s", (_label, from) => {
+      expect(appearanceRejection(appearanceWith({ parts: { shirt: from } }))).toEqual({
+        kind: "malformed",
+        at: "$.parts.shirt",
+      });
+    });
+  });
+
+  describe("rejects parts that are not slots", () => {
+    it.each([
+      ["missing", undefined],
+      ["an array", [["hair", "skin-b"]]],
+      ["a string", "hair"],
+      ["a slot the format does not have", { hat: "skin-b" }],
+      ["a property every object has", JSON.parse('{"__proto__":"skin-b"}') as unknown],
+    ])("%s", (_label, parts) => {
+      expect(appearanceRejection(appearanceWith({ parts }))).toEqual({
+        kind: "malformed",
+        at: "$.parts",
+      });
+    });
+  });
+
+  describe("rejects colours that could escape into CSS", () => {
+    it.each([
+      ["a colour keyword", "red"],
+      ["shorthand hex", "#fff"],
+      ["a url() reference", "url(https://example.invalid/x.svg#a)"],
+      ["a non-hex digit", "#12345g"],
+      ["trailing junk", "#123456;x"],
+      ["a second declaration", "#123456;background:url(x)"],
+      ["a var() of its own", "var(--c-other)"],
+    ])("hex: %s", (_label, hex) => {
+      expect(appearanceRejection(appearanceWith({ colours: [{ id: "hair", hex }] }))).toEqual({
+        kind: "bad_hex",
+        hex,
+      });
+    });
+
+    it.each([
+      ["uppercase", "Hair"],
+      ["a space", "hair colour"],
+      ["a CSS declaration", "hair:red;--c-skin"],
+      ["a closing brace", "hair}"],
+      ["an underscore", "hair_2"],
+      ["empty", ""],
+      ["over 32 characters", "h".repeat(33)],
+    ])("id: %s", (_label, id) => {
+      expect(appearanceRejection(appearanceWith({ colours: [{ id, hex: "#123456" }] }))).toEqual({
+        kind: "bad_palette_id",
+        id,
+      });
+    });
+
+    it("the same id twice, which would leave it to chance which colour wins", () => {
+      const colours = [
+        { id: "hair", hex: "#111111" },
+        { id: "hair", hex: "#222222" },
+      ];
+      expect(appearanceRejection(appearanceWith({ colours }))).toEqual({
+        kind: "duplicate_palette_id",
+        id: "hair",
+      });
+    });
+
+    it.each([
+      ["missing", undefined, "$.colours"],
+      ["an object keyed by id", { hair: "#cc3344" }, "$.colours"],
+      ["an entry that is not an object", ["hair"], "$.colours[0]"],
+      ["an entry with no id", [{ hex: "#cc3344" }], "$.colours[0].id"],
+      ["an entry with no hex", [{ id: "hair" }], "$.colours[0].hex"],
+      ["a hex that is a number", [{ id: "hair", hex: 0xcc3344 }], "$.colours[0].hex"],
+    ])("the wrong shape: %s", (_label, colours, at) => {
+      expect(appearanceRejection(appearanceWith({ colours }))).toEqual({ kind: "malformed", at });
+    });
+
+    it("more colours than a skin can have", () => {
+      const colours = Array.from({ length: APPEARANCE_SPEC.maxColours + 1 }, (_, i) => ({
+        id: `c${i}`,
+        hex: "#123456",
+      }));
+      expect(appearanceRejection(appearanceWith({ colours }))).toEqual({
+        kind: "too_many",
+        what: "colours",
+        got: colours.length,
+        max: APPEARANCE_SPEC.maxColours,
+      });
+    });
+  });
+
+  it("accepts an id that is also the name of something every object has", () => {
+    // "constructor" matches the id pattern. The recipe keeps colours as a list
+    // so that a name like this is only ever data.
+    const colours = [{ id: "constructor", hex: "#123456" }];
+    expect(acceptedAppearance(appearanceWith({ colours })).colours).toEqual(colours);
+  });
+});
+
+/** A skin with something different drawn on every part, through the real pipeline. */
+function drawnSkin(seed: number, palette: PaletteEntry[], frames = 1): RenderableSkin {
+  const rand = mulberry32(seed);
+  const parsed = parseSkin({
+    formatVersion: 1,
+    name: `fixture ${seed}`,
+    palette,
+    parts: PART_SLOTS.map((slot) => ({
+      slot,
+      frames: Array.from({ length: frames }, (_, f) =>
+        frameOf(randomGrid(rand, palette.length, true), 100 + 10 * f),
+      ),
+    })),
+  });
+  if (!parsed.ok) throw new Error(`fixture is invalid: ${JSON.stringify(parsed.error)}`);
+  return toRenderable(parsed.value);
+}
+
+/**
+ * What one frame of one part shows, cell by cell, as the palette entry each
+ * cell is painted with. This is what has to survive being composed: not the
+ * colour numbers, which are renumbered, but what they stand for.
+ */
+function shown(skin: RenderableSkin, slot: PartSlot, frame = 0): (string | null)[] {
+  const rects = skin.parts.find((part) => part.slot === slot)?.frames[frame]?.rects;
+  if (rects === undefined) throw new Error(`no frame ${frame} for ${slot}`);
+  return gridFromRects(rects).map((index) => {
+    if (index === 0) return null;
+    const entry = skin.palette[index - 1];
+    if (entry === undefined) throw new Error(`colour ${index} is not in the palette`);
+    return `${entry.id} ${entry.hex}`;
+  });
+}
+
+const PALETTE_A: PaletteEntry[] = [
+  { id: "skin", hex: "#e8b98a" },
+  { id: "hair", hex: "#5a3921" },
+  { id: "shirt", hex: "#3f7bd6" },
+];
+
+// Shares two ids with A, in other colours, and has one of its own.
+const PALETTE_B: PaletteEntry[] = [
+  { id: "hair", hex: "#222222" },
+  { id: "hat", hex: "#aa2200" },
+  { id: "skin", hex: "#c68642" },
+  { id: "shirt", hex: "#ffffff" },
+];
+
+describe("composeAppearance", () => {
+  const a = drawnSkin(1, PALETTE_A, 2);
+  const b = drawnSkin(2, PALETTE_B, 3);
+  const skins = new Map([
+    ["a", a],
+    ["b", b],
+  ]);
+
+  it("draws the worn skin exactly as it is when nothing is swapped", () => {
+    const look = composeAppearance({ skinId: "a", parts: {} }, skins);
+    expect(look).toEqual(a);
+  });
+
+  it("takes each swapped slot from the other skin and leaves the rest alone", () => {
+    // Every way of choosing, for each of the five slots, between two skins.
+    for (let mask = 0; mask < 1 << PART_SLOTS.length; mask++) {
+      const parts: Partial<Record<PartSlot, string>> = {};
+      PART_SLOTS.forEach((slot, i) => {
+        if ((mask & (1 << i)) !== 0) parts[slot] = "b";
+      });
+
+      const look = composeAppearance({ skinId: "a", parts }, skins);
+      if (look === undefined) throw new Error("the worn skin was there");
+
+      for (const slot of PART_SLOTS) {
+        const source = parts[slot] === undefined ? a : b;
+        const frames = source.parts.find((part) => part.slot === slot)?.frames ?? [];
+        const composed = look.parts.find((part) => part.slot === slot)?.frames ?? [];
+        // Each part brings its own frames and timings with it.
+        expect(composed.map((frame) => frame.durationMs)).toEqual(
+          frames.map((frame) => frame.durationMs),
+        );
+        frames.forEach((_, f) => {
+          expect(shown(look, slot, f)).toEqual(shown(source, slot, f));
+        });
+      }
+    }
+  });
+
+  it("keeps the parts in draw order whatever the recipe says first", () => {
+    const look = composeAppearance({ skinId: "a", parts: { hair: "b", body: "b" } }, skins);
+    expect(look?.parts.map((part) => part.slot)).toEqual([...PART_SLOTS]);
+  });
+
+  it("carries a skin's palette once, however many of its parts are used", () => {
+    const look = composeAppearance({ skinId: "a", parts: { hair: "b", shoes: "b" } }, skins);
+    expect(look?.palette).toEqual([...PALETTE_A, ...PALETTE_B]);
+  });
+
+  it("leaves out the palette of a skin that contributes nothing", () => {
+    const everything = Object.fromEntries(PART_SLOTS.map((slot) => [slot, "b"]));
+    const look = composeAppearance({ skinId: "a", parts: everything }, skins);
+    expect(look?.palette).toEqual(PALETTE_B);
+  });
+
+  it("falls back to the worn skin's own part when the other skin is not there", () => {
+    const look = composeAppearance({ skinId: "a", parts: { hair: "gone" } }, skins);
+    expect(look).toEqual(a);
+  });
+
+  it("has nothing to draw when the worn skin is not there", () => {
+    expect(composeAppearance({ skinId: "gone", parts: { hair: "b" } }, skins)).toBeUndefined();
+  });
+
+  it("does not change the skins it was given", () => {
+    const before = JSON.stringify([a, b]);
+    composeAppearance({ skinId: "a", parts: { hair: "b", pants: "b" } }, skins);
+    expect(JSON.stringify([a, b])).toBe(before);
+  });
+});
+
+describe("coloursOf", () => {
+  /** A skin whose body is painted with exactly these colour numbers. */
+  function paintedWith(palette: PaletteEntry[], indices: number[]): RenderableSkin {
+    const grid = new Array<number>(CELLS_PER_FRAME).fill(0);
+    indices.forEach((index, i) => {
+      grid[i * 2] = index;
+    });
+    const parsed = parseSkin({
+      formatVersion: 1,
+      name: "fixture",
+      palette,
+      parts: PART_SLOTS.map((slot) => ({
+        slot,
+        frames: [frameOf(slot === "body" ? grid : new Array<number>(CELLS_PER_FRAME).fill(0))],
+      })),
+    });
+    if (!parsed.ok) throw new Error(`fixture is invalid: ${JSON.stringify(parsed.error)}`);
+    return toRenderable(parsed.value);
+  }
+
+  it("lists the colours that are painted with, in palette order", () => {
+    expect(coloursOf(paintedWith(PALETTE_A, [3, 1]))).toEqual([PALETTE_A[0], PALETTE_A[2]]);
+  });
+
+  it("leaves out a colour no cell uses", () => {
+    expect(coloursOf(paintedWith(PALETTE_A, [2])).map((entry) => entry.id)).toEqual(["hair"]);
+  });
+
+  it("is empty for a skin with nothing drawn on it", () => {
+    expect(coloursOf(paintedWith(PALETTE_A, []))).toEqual([]);
+  });
+
+  it("counts a colour used only in a later frame", () => {
+    const only = (index: number) => new Array<number>(CELLS_PER_FRAME).fill(index);
+    const parsed = parseSkin({
+      formatVersion: 1,
+      name: "fixture",
+      palette: PALETTE_A,
+      parts: PART_SLOTS.map((slot) => ({
+        slot,
+        frames: slot === "body" ? [frameOf(only(1)), frameOf(only(3))] : [frameOf(only(0))],
+      })),
+    });
+    if (!parsed.ok) throw new Error(`fixture is invalid: ${JSON.stringify(parsed.error)}`);
+    expect(coloursOf(toRenderable(parsed.value)).map((entry) => entry.id)).toEqual([
+      "skin",
+      "shirt",
+    ]);
+  });
+
+  it("does not offer the colours of a skin whose swapped-in part has nothing drawn on it", () => {
+    // Both fixtures draw on the body only. B is worn, and A lends its shirt,
+    // which is blank: A's palette comes along, but nothing is painted with it.
+    const a = paintedWith(PALETTE_A, [1, 2, 3]);
+    const b = paintedWith(PALETTE_B, [1, 2, 3, 4]);
+    const look = composeAppearance(
+      { skinId: "b", parts: { shirt: "a" } },
+      new Map([
+        ["a", a],
+        ["b", b],
+      ]),
+    );
+    if (look === undefined) throw new Error("the worn skin was there");
+    expect(look.palette).toEqual([...PALETTE_B, ...PALETTE_A]);
+    expect(coloursOf(look)).toEqual(PALETTE_B);
+  });
+
+  it("offers every role once across the skins that are actually drawn", () => {
+    const a = drawnSkin(3, PALETTE_A);
+    const b = drawnSkin(4, PALETTE_B);
+    const look = composeAppearance(
+      { skinId: "a", parts: { hair: "b" } },
+      new Map([
+        ["a", a],
+        ["b", b],
+      ]),
+    );
+    if (look === undefined) throw new Error("the worn skin was there");
+    const ids = coloursOf(look).map((entry) => entry.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    // A comes first, so where both have an id it is A's colour that is shown.
+    expect(coloursOf(look).find((entry) => entry.id === "hair")?.hex).toBe("#5a3921");
+    expect(ids).toContain("hat");
   });
 });
