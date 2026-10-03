@@ -232,6 +232,18 @@ export const mapEncounters = sqliteTable(
 // Monsters — what belongs to a player
 // ---------------------------------------------------------------------------
 
+/**
+ * A monster a player owns: which species it is, and what has become of it.
+ *
+ * What has become of it is two numbers, and neither is the one a screen
+ * shows. The level is not stored: it follows from `exp`. The health is not
+ * stored: it is the most the monster can have at its level, less `damage`
+ * (docs/03-data-model.md). Both rules are in `@mba/core`.
+ *
+ * Stored this way round, zero means something for both — a monster that has
+ * earned nothing and lost nothing — so the columns could be added to rows
+ * that already existed without deciding anything for them.
+ */
 export const ownedMonsters = sqliteTable("owned_monsters", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -241,6 +253,10 @@ export const ownedMonsters = sqliteTable("owned_monsters", {
     .notNull()
     .references(() => species.id),
   nickname: text("nickname"),
+  /** Experience earned so far. */
+  exp: integer("exp").notNull().default(0),
+  /** Health lost and not yet got back. */
+  damage: integer("damage").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
