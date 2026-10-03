@@ -78,6 +78,11 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 <http://localhost:3000> でプレイヤー向け SPA、<http://localhost:3000/admin> で管理画面。API と両方の SPA を Hono が 1 プロセス・1 ポートで配信する。
 
+- **開発用のコンテナが動いていると、ポート 3000 がぶつかる。** 先に `docker compose stop` するか、
+  `-p 3300:3000` のように公開するポートを変える（その場合は <http://localhost:3300>）
+- データは名前付きボリューム `mba-data` に入る。開発用の DB（`sqlite-data`）とは別物で、最初は空から始まる
+- Ctrl+C でも `docker stop` でもすぐに止まる。プロセスが自分でシグナルを受けて、DB を閉じてから終了する
+
 ## コマンド
 
 | コマンド | 内容 |
@@ -102,10 +107,9 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 ## 現在の状態
 
-**Step 6（エディタを道具として仕上げる）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
-残っているのは Step 7（本番相当の 1 コンテナでの確認）だけ。
+**ロードマップの Step 0〜7 をすべて終えた。** 各 Step で決めたこと・やらなかったことは [docs/05-roadmap.md](docs/05-roadmap.md) にある。
 
-プレイヤー側の縦の串が 3 本と、それらが読むマスターデータを書く管理画面がある。
+プレイヤー側の縦の串が 3 本と、それらが読むマスターデータを書く管理画面があり、全体が 1 コンテナ・1 ポートでも動く。
 
 ```
 エディタ → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示（開き直すときは /source）
@@ -121,4 +125,4 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 - `@mba/api` … ゲーム API（スキン、マップ、セーブ、バトル）と管理 API（種族、マップ）。インメモリの SQLite と決め打ちの乱数でテストしている
 - `@mba/web` … マップ画面、バトル画面、スキンエディタ（パーツごとに描く・色を足す／作り直す・コマと再生・着せ替えプレビュー）
 - `@mba/admin` … 種族の一覧とフォーム、マップの一覧とタイルを塗るエディタ
-- まだ無いもの … エディタの undo、技の編集、retire、マップ間の移動、成長（レベルや HP の持ち越し）、見た目のレシピ
+- ロードマップの外に残っているもの … エディタの undo、技の編集、retire、マップ間の移動、成長（レベルや HP の持ち越し）、見た目のレシピ
