@@ -244,3 +244,48 @@ describe("GET /api/skins/:id", () => {
     expect(await res.json()).toEqual({ error: { kind: "not_found" } });
   });
 });
+
+describe("GET /api/skins/:id/source", () => {
+  it("returns the editable form: the skin as parseSkin rebuilt it", async () => {
+    const { app } = setup();
+    const id = await save(app, validInput());
+
+    const res = await app.request(`/api/skins/${id}/source`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toContain("application/json");
+    expect(await res.json()).toEqual(parsed(validInput()));
+  });
+
+  it("can be saved again as it is: what comes out is something parseSkin accepts", async () => {
+    const { app } = setup();
+    const first = await save(app, validInput());
+    const source: unknown = await (await app.request(`/api/skins/${first}/source`)).json();
+
+    const second = await save(app, source);
+    expect(second).not.toBe(first);
+    const again = await (await app.request(`/api/skins/${second}`)).json();
+    expect(again).toEqual(toRenderable(parsed(validInput())));
+  });
+
+  it("never carries what the validator dropped", async () => {
+    const { app } = setup();
+    const id = await save(app, inputWith({ evil: "<script>alert(1)</script>" }));
+    const text = await (await app.request(`/api/skins/${id}/source`)).text();
+    expect(text).not.toContain("evil");
+    expect(text).not.toContain("script");
+  });
+
+  it("serves the skins that ship with the game as well", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/skins/species-moss/source");
+    expect(res.status).toBe(200);
+    expect(parseSkin(await res.json()).ok).toBe(true);
+  });
+
+  it("answers 404 for an id that was never saved", async () => {
+    const { app } = setup();
+    const res = await app.request("/api/skins/no-such-skin/source");
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: { kind: "not_found" } });
+  });
+});

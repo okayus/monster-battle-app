@@ -2,8 +2,9 @@
  * Skin routes — the first slice that goes all the way through
  * (docs/05-roadmap.md, Step 2).
  *
- *   POST /api/skins      the editor's output: validated, then stored twice
- *   GET  /api/skins/:id  the render-ready form, exactly as stored
+ *   POST /api/skins             the editor's output: validated, then stored twice
+ *   GET  /api/skins/:id         the render-ready form, exactly as stored
+ *   GET  /api/skins/:id/source  the editable form, for opening a skin in the editor
  *
  * There is no zod schema here, on purpose. `parseSkin` is the single trust
  * boundary for skins (docs/02-sprite-format.md), and a second description of
@@ -66,6 +67,22 @@ export function skinRoutes(db: Db) {
     // the payoff of deriving the render-ready form at write time — the read
     // path is one indexed lookup and a copy.
     return c.body(row.renderable, 200, { "Content-Type": "application/json" });
+  });
+
+  routes.get("/:id/source", (c) => {
+    const row = db
+      .select({ source: skins.source })
+      .from(skins)
+      .where(eq(skins.id, c.req.param("id")))
+      .get();
+    if (row === undefined) return c.json({ error: { kind: "not_found" } }, 404);
+
+    // The other half of what was stored: the skin as `parseSkin` rebuilt it,
+    // which is what an editor needs to carry on from. Screens that only draw
+    // never ask for this: they would have to expand and merge it themselves,
+    // which is the work that was done once, at write time, so that no read
+    // has to repeat it.
+    return c.body(row.source, 200, { "Content-Type": "application/json" });
   });
 
   return routes;
