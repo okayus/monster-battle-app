@@ -2,6 +2,8 @@
 #
 #   docker compose up                       -> "dev" stage: bind-mounted source,
 #                                              hot reload for all three surfaces
+#   docker build --target check .            -> "check" stage: types, lint,
+#                                              formatting and unit tests
 #   docker build --target prod -t <tag> .    -> "prod" stage: one container that
 #                                              serves the API + both SPAs
 #
@@ -51,10 +53,35 @@ RUN mkdir -p /app/node_modules \
 USER node
 EXPOSE 3000 5173 5174
 
-# ---- builder (intermediate only, not a compose target) ---------------------
-FROM base AS builder
+# ---- deps (intermediate only, not a compose target) ------------------------
+# The repository with its dependencies installed, and nothing built yet.
+# `check` and `builder` both start here, so the install happens once.
+FROM base AS deps
 COPY . .
 RUN pnpm install --frozen-lockfile
+
+# ---- check -----------------------------------------------------------------
+#   docker build --target check .
+#
+# Everything that can be verified without running the app: types, lint,
+# formatting, unit tests. The build succeeds only if all of them pass, so this
+# one command is what CI runs and what reproduces a CI failure locally — same
+# image, same lockfile, no dependence on what happens to be installed on the
+# machine.
+#
+# It branches off before anything is built on purpose. The linter and the
+# formatter walk the whole tree, and built output is not source.
+#
+# One RUN per check, so the failing step is named in the build output and the
+# ones before it stay cached.
+FROM deps AS check
+RUN pnpm typecheck
+RUN pnpm lint
+RUN pnpm fmt:check
+RUN pnpm test
+
+# ---- builder (intermediate only) -------------------------------------------
+FROM deps AS builder
 # pnpm's recursive commands run in workspace-dependency order, so the packages
 # build before the apps that consume them.
 RUN pnpm -r run build
