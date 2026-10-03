@@ -155,7 +155,8 @@ describe("toRenderable", () => {
       for (const [x, y, w, h] of rectsOf(grid)) {
         for (let dy = 0; dy < h; dy++) {
           for (let dx = 0; dx < w; dx++) {
-            painted[(y + dy) * SKIN_SPEC.canvasSize + x + dx] += 1;
+            const i = (y + dy) * SKIN_SPEC.canvasSize + x + dx;
+            painted[i] = (painted[i] ?? 0) + 1;
           }
         }
       }
