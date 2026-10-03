@@ -5,3 +5,14 @@ dist
 .git
 data
 *.tsbuildinfo
+
+# The dev container's pnpm store. It lands in the repo directory because the
+# bind mount is a different filesystem from the container's home, and it is
+# hundreds of megabytes. The build installs its own dependencies; without this
+# line `COPY . .` would carry the store into the builder and, from there, into
+# the production image.
+.pnpm-store
+
+# Never bake local secrets into an image. (.gitignore keeps this file out of
+# the repository; this keeps it out of the build context as well.)
+.env
