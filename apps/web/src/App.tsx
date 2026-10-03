@@ -15,11 +15,12 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import { BattleScreen } from "./BattleScreen.js";
+import { fromSkin, newEditor } from "./editor/model.js";
+import { SkinEditor } from "./editor/SkinEditor.js";
 import { MapScreen } from "./MapScreen.js";
 import { hrefs, parseRoute } from "./route.js";
 import type { Route } from "./route.js";
 import { SavedSkin } from "./SavedSkin.js";
-import { SkinEditor } from "./SkinEditor.js";
 
 function subscribeToHash(onChange: () => void): () => void {
   window.addEventListener("hashchange", onChange);
@@ -49,6 +50,9 @@ const columns: CSSProperties = { display: "flex", gap: "3rem", flexWrap: "wrap" 
 export function App() {
   const [health, setHealth] = useState<string>("...");
   const route = useRoute();
+  // The drawing in progress is kept up here, above the screens, so that a look
+  // at the map does not throw it away. It does not survive a reload.
+  const [editor, setEditor] = useState(newEditor);
 
   useEffect(() => {
     // Proves the Vite dev server's /api proxy reaches the Hono process.
@@ -80,6 +84,8 @@ export function App() {
       {route.screen === "editor" && (
         <div style={columns}>
           <SkinEditor
+            state={editor}
+            onChange={setEditor}
             onSaved={(id) => {
               // Saving a skin navigates to its address. That address shows the
               // same skin after a reload, which is the evidence that it came
@@ -87,7 +93,13 @@ export function App() {
               window.location.hash = hrefs.skin(id);
             }}
           />
-          {route.skinId !== null && <SavedSkin key={route.skinId} id={route.skinId} />}
+          {route.skinId !== null && (
+            <SavedSkin
+              key={route.skinId}
+              id={route.skinId}
+              onOpen={(skin) => setEditor(fromSkin(skin))}
+            />
+          )}
         </div>
       )}
     </main>

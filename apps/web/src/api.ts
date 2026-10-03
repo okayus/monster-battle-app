@@ -75,6 +75,14 @@ export function fetchSkin(id: string): Promise<Result<RenderableSkin, ApiError>>
   return request(`/api/skins/${encodeURIComponent(id)}`);
 }
 
+/**
+ * Fetches the editable form of a saved skin, to open it in the editor. Only
+ * the editor asks for this; a screen that just draws a skin uses `fetchSkin`.
+ */
+export function fetchSkinSource(id: string): Promise<Result<Skin, ApiError>> {
+  return request(`/api/skins/${encodeURIComponent(id)}/source`);
+}
+
 /** Where the player is. The server answers with the starting point if nothing was ever saved. */
 export function fetchSave(): Promise<Result<SaveData, ApiError>> {
   return request("/api/save");

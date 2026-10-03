@@ -8,10 +8,10 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
-import type { RenderableSkin } from "@mba/sprite";
-import { Sprite } from "@mba/sprite-react";
+import type { RenderableSkin, Skin } from "@mba/sprite";
+import { Sprite, useElapsedMs } from "@mba/sprite-react";
 
-import { fetchSkin } from "./api.js";
+import { fetchSkin, fetchSkinSource } from "./api.js";
 import type { ApiError } from "./api.js";
 
 type LoadState =
@@ -22,12 +22,21 @@ type LoadState =
 // The <svg> has a viewBox and no size of its own, so it fills this box.
 const frame: CSSProperties = { width: "12rem", border: "1px solid #888", lineHeight: 0 };
 
+/** A skin that moves, if it has more than one frame anywhere. */
+function Playing({ skin }: { skin: RenderableSkin }) {
+  const animated = skin.parts.some((part) => part.frames.length > 1);
+  // A still image has no use for a clock, so it is not given one.
+  const elapsedMs = useElapsedMs(animated);
+  return <Sprite skin={skin} elapsedMs={animated ? elapsedMs : undefined} />;
+}
+
 /**
  * The caller keys this component by `id`, so a different id is a fresh mount
  * that starts out "loading" — there is never a stale skin to clear first.
  */
-export function SavedSkin({ id }: { id: string }) {
+export function SavedSkin({ id, onOpen }: { id: string; onOpen: (skin: Skin) => void }) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [openError, setOpenError] = useState<ApiError | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +54,18 @@ export function SavedSkin({ id }: { id: string }) {
     };
   }, [id]);
 
+  const open = async () => {
+    setOpenError(null);
+    // The editable form is a separate request, made only now. Drawing never
+    // needs it: what is on screen came from the render-ready form.
+    const source = await fetchSkinSource(id);
+    if (!source.ok) {
+      setOpenError(source.error);
+      return;
+    }
+    onOpen(source.value);
+  };
+
   return (
     <section aria-label="保存されたスキン">
       <h2>保存されたスキン</h2>
@@ -54,10 +75,19 @@ export function SavedSkin({ id }: { id: string }) {
       {state.kind === "loading" && <p>読み込み中…</p>}
       {state.kind === "failed" && <p role="alert">取得できなかった（{state.error.kind}）</p>}
       {state.kind === "loaded" && (
-        <div style={frame}>
-          <Sprite skin={state.skin} />
-        </div>
+        <>
+          <div style={frame}>
+            <Playing skin={state.skin} />
+          </div>
+          <p>
+            <button type="button" onClick={() => void open()}>
+              このスキンをエディタで開く
+            </button>
+          </p>
+          <p>開くと、いまエディタにある絵は置きかわる。保存すると新しいスキンになる。</p>
+        </>
       )}
+      {openError !== null && <p role="alert">開けなかった（{openError.kind}）</p>}
     </section>
   );
 }
