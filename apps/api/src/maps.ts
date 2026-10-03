@@ -6,11 +6,21 @@
  * docs/05-roadmap.md); until that exists, the only map is the one seeded here.
  */
 
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, isNull, ne } from "drizzle-orm";
 
 import { err, ok } from "@mba/core";
-import type { AdminMap, Encounter, GameMap, MapInput, Position, Result, TileKind } from "@mba/core";
-import { mapEncounters, maps } from "@mba/db";
+import type {
+  AdminMap,
+  Encounter,
+  GameMap,
+  MapExit,
+  MapInput,
+  MasterReference,
+  Position,
+  Result,
+  TileKind,
+} from "@mba/core";
+import { mapEncounters, mapExits, maps } from "@mba/db";
 import type { Db, MapRow } from "@mba/db";
 
 /** The map a player with no save starts on. */
@@ -22,7 +32,7 @@ export const START_MAP_ID = "start";
  * else a row is read: what is in the database was checked by the code that put
  * it there.
  */
-function toGameMap(row: MapRow): GameMap {
+function toGameMap(row: MapRow, exits: MapExit[]): GameMap {
   return {
     id: row.id,
     name: row.name,
@@ -30,7 +40,22 @@ function toGameMap(row: MapRow): GameMap {
     height: row.height,
     tiles: JSON.parse(row.tiles) as TileKind[],
     spawn: { x: row.spawnX, y: row.spawnY },
+    exits,
   };
+}
+
+/** The ways out of a map, in reading order: top row first, left to right. */
+function exitsOf(db: Db, mapId: string): MapExit[] {
+  return db
+    .select()
+    .from(mapExits)
+    .where(eq(mapExits.mapId, mapId))
+    .orderBy(asc(mapExits.y), asc(mapExits.x))
+    .all()
+    .map((row) => ({
+      at: { x: row.x, y: row.y },
+      to: { mapId: row.toMapId, position: { x: row.toX, y: row.toY } },
+    }));
 }
 
 /**
@@ -48,7 +73,7 @@ export function findMap(db: Db, id: string): GameMap | undefined {
     .from(maps)
     .where(and(eq(maps.id, id), isNull(maps.retiredAt)))
     .get();
-  return row === undefined ? undefined : toGameMap(row);
+  return row === undefined ? undefined : toGameMap(row, exitsOf(db, id));
 }
 
 // ---------------------------------------------------------------------------
@@ -73,10 +98,39 @@ export function findAdminMap(db: Db, id: string): AdminMap | undefined {
   const row = db.select().from(maps).where(eq(maps.id, id)).get();
   if (row === undefined) return undefined;
   return {
-    ...toGameMap(row),
+    ...toGameMap(row, exitsOf(db, id)),
     encounters: encounterRowsOf(db, id),
     retired: row.retiredAt !== null,
   };
+}
+
+/** An exit on some other map that arrives on this one: where from, and where it lands. */
+export interface IncomingExit {
+  from: MasterReference;
+  lands: Position;
+}
+
+/**
+ * Every exit that leads onto a map from a different map — from maps in use
+ * and retired ones alike.
+ *
+ * Asked before a map is redrawn. An exit always arrives on a tile that can be
+ * stood on; drawing a tree over that tile would break an exit that lives in
+ * another map's data. Retired maps count too, so that bringing one back never
+ * has to ask this question again.
+ */
+export function exitsInto(db: Db, mapId: string): IncomingExit[] {
+  return db
+    .select({ id: maps.id, name: maps.name, toX: mapExits.toX, toY: mapExits.toY })
+    .from(mapExits)
+    .innerJoin(maps, eq(mapExits.mapId, maps.id))
+    .where(and(eq(mapExits.toMapId, mapId), ne(mapExits.mapId, mapId)))
+    .orderBy(asc(maps.name), asc(maps.id), asc(mapExits.y), asc(mapExits.x))
+    .all()
+    .map((row) => ({
+      from: { kind: "map", id: row.id, name: row.name },
+      lands: { x: row.toX, y: row.toY },
+    }));
 }
 
 export function listMaps(db: Db): AdminMap[] {
@@ -91,10 +145,10 @@ export function listMaps(db: Db): AdminMap[] {
 }
 
 /**
- * Creates or replaces a map together with its encounters, in one transaction,
- * for the same reason a species is saved with its moves: they are edited as
- * one thing. The encounters are replaced, so leaving a species out of the list
- * is how it stops turning up.
+ * Creates or replaces a map together with its encounters and its exits, in one
+ * transaction, for the same reason a species is saved with its moves: they are
+ * edited as one thing. Both lists are replaced, so leaving a species or an exit
+ * out is how it goes away.
  */
 export function saveMap(db: Db, id: string, input: MapInput): void {
   const row = {
@@ -113,6 +167,21 @@ export function saveMap(db: Db, id: string, input: MapInput): void {
     tx.delete(mapEncounters).where(eq(mapEncounters.mapId, id)).run();
     for (const { speciesId, weight } of input.encounters) {
       tx.insert(mapEncounters).values({ mapId: id, speciesId, weight }).run();
+    }
+    // Only the exits that leave this map. Exits that arrive here belong to
+    // the maps they leave from.
+    tx.delete(mapExits).where(eq(mapExits.mapId, id)).run();
+    for (const { at, to } of input.exits) {
+      tx.insert(mapExits)
+        .values({
+          mapId: id,
+          x: at.x,
+          y: at.y,
+          toMapId: to.mapId,
+          toX: to.position.x,
+          toY: to.position.y,
+        })
+        .run();
     }
   });
 }
@@ -180,7 +249,9 @@ export function mapFromArt(
   if (spawn === undefined || spawns.length !== 1) {
     return err({ kind: "spawn_count", got: spawns.length });
   }
-  return ok({ id, name, width, height: rows.length, tiles, spawn });
+  // A drawing has no way of saying where an exit leads. Exits are added from
+  // the admin screen.
+  return ok({ id, name, width, height: rows.length, tiles, spawn, exits: [] });
 }
 
 export function starterMap(): Result<GameMap, MapArtError> {

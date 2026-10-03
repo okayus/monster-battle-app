@@ -13,6 +13,7 @@
 import { canStandOn, isWalkable } from "@mba/core";
 import type {
   AdminMap,
+  MapExit,
   MapInput,
   Move,
   MoveInput,
@@ -113,6 +114,8 @@ export interface MapForm {
    * the ones that do.
    */
   weights: Record<string, number>;
+  /** The ways out of the map, in the order they were added. */
+  exits: MapExit[];
 }
 
 /** The size a new map starts at. The API accepts others; this screen does not resize. */
@@ -127,6 +130,7 @@ export function blankMapForm(): MapForm {
     tiles: new Array<TileKind>(NEW_MAP.width * NEW_MAP.height).fill("path"),
     spawn: { x: 0, y: 0 },
     weights: {},
+    exits: [],
   };
 }
 
@@ -141,6 +145,7 @@ export function mapFormOf(map: AdminMap): MapForm {
     tiles: [...map.tiles],
     spawn: map.spawn,
     weights,
+    exits: map.exits.map((exit) => ({ at: exit.at, to: exit.to })),
   };
 }
 
@@ -156,6 +161,7 @@ export function toMapInput(form: MapForm): MapInput {
       .map(([speciesId, weight]) => ({ speciesId, weight }))
       // A fixed order, so the same form always sends the same body.
       .sort((a, b) => a.speciesId.localeCompare(b.speciesId)),
+    exits: form.exits,
   };
 }
 
@@ -175,6 +181,8 @@ export function paintTile(form: MapForm, index: number, kind: TileKind): MapForm
   if (index < 0 || index >= form.tiles.length) return form;
   if (form.tiles[index] === kind) return form;
   if (index === indexOf(form, form.spawn) && !isWalkable(kind)) return form;
+  // The same for a tile with an exit on it: nobody could step onto it.
+  if (exitIndexAt(form, index) >= 0 && !isWalkable(kind)) return form;
 
   const tiles = form.tiles.slice();
   tiles[index] = kind;
@@ -192,4 +200,53 @@ export function moveSpawn(form: MapForm, index: number): MapForm {
 /** Sets one species' weight. Anything that is not a positive number means "does not turn up". */
 export function setWeight(form: MapForm, speciesId: string, weight: number): MapForm {
   return { ...form, weights: { ...form.weights, [speciesId]: weight > 0 ? weight : 0 } };
+}
+
+// ---------------------------------------------------------------------------
+// Exits
+// ---------------------------------------------------------------------------
+
+function positionOf(form: MapForm, index: number): Position {
+  return { x: index % form.width, y: Math.floor(index / form.width) };
+}
+
+/** Where in `form.exits` the exit on a tile is, or -1 if the tile has none. */
+function exitIndexAt(form: MapForm, index: number): number {
+  return form.exits.findIndex((exit) => indexOf(form, exit.at) === index);
+}
+
+/** Whether a tile has a way out on it. */
+export function hasExit(form: MapForm, index: number): boolean {
+  return exitIndexAt(form, index) >= 0;
+}
+
+/**
+ * Puts an exit on a tile, or takes away the one that is there.
+ *
+ * A new exit leads to `to` until it is pointed somewhere else — the screen
+ * passes the spawn of another map, which is always a tile that can be stood
+ * on. An exit only goes on a tile a player can step onto; anywhere else the
+ * form comes back unchanged.
+ */
+export function toggleExit(form: MapForm, index: number, to: MapExit["to"]): MapForm {
+  if (index < 0 || index >= form.tiles.length) return form;
+  const existing = exitIndexAt(form, index);
+  if (existing >= 0) {
+    return { ...form, exits: form.exits.filter((_, i) => i !== existing) };
+  }
+  const at = positionOf(form, index);
+  if (!canStandOn(form, at)) return form;
+  return { ...form, exits: [...form.exits, { at, to }] };
+}
+
+/** Points the exit on a tile somewhere else. A tile without one is left alone. */
+export function setExitTarget(form: MapForm, at: Position, to: MapExit["to"]): MapForm {
+  const index = indexOf(form, at);
+  if (!hasExit(form, index)) return form;
+  return {
+    ...form,
+    exits: form.exits.map((exit) =>
+      indexOf(form, exit.at) === index ? { at: exit.at, to } : exit,
+    ),
+  };
 }

@@ -11,8 +11,11 @@ import {
   moveFormOf,
   moveSpawn,
   paintTile,
+  hasExit,
+  setExitTarget,
   setWeight,
   speciesFormOf,
+  toggleExit,
   toMapInput,
   toMoveInput,
   toSpeciesInput,
@@ -44,6 +47,8 @@ const POND: AdminMap = {
     { speciesId: "drop", weight: 3 },
     { speciesId: "moss", weight: 5 },
   ],
+  // On the path in the bottom-right corner.
+  exits: [{ at: { x: 2, y: 1 }, to: { mapId: "start", position: { x: 1, y: 1 } } }],
   retired: false,
 };
 
@@ -200,5 +205,78 @@ describe("moveSpawn", () => {
 
   it("hands back the same form when the spawn is already there", () => {
     expect(moveSpawn(form, 0)).toBe(form);
+  });
+});
+
+describe("exits on the map form", () => {
+  const ELSEWHERE = { mapId: "start", position: { x: 1, y: 1 } };
+  const CAVE = { mapId: "cave", position: { x: 4, y: 4 } };
+
+  /** The fixture without its exit, so each test starts from none. */
+  function bare() {
+    return { ...mapFormOf(POND), exits: [] };
+  }
+
+  it("loads the exits a map has, and sends them back untouched", () => {
+    expect(mapFormOf(POND).exits).toEqual(POND.exits);
+    expect(toMapInput(mapFormOf(POND)).exits).toEqual(POND.exits);
+    expect(checkMap(toMapInput(mapFormOf(POND))).ok).toBe(true);
+  });
+
+  it("starts a new map with no way out", () => {
+    expect(blankMapForm().exits).toEqual([]);
+  });
+
+  it("puts an exit on a tile a player can step onto, leading where it was told", () => {
+    // Index 2 is (2,0), the grass.
+    const form = toggleExit(bare(), 2, ELSEWHERE);
+    expect(form.exits).toEqual([{ at: { x: 2, y: 0 }, to: ELSEWHERE }]);
+    expect(hasExit(form, 2)).toBe(true);
+    expect(hasExit(form, 1)).toBe(false);
+    expect(checkMap(toMapInput(form)).ok).toBe(true);
+  });
+
+  it("takes the exit away when the same tile is chosen again", () => {
+    const form = toggleExit(toggleExit(bare(), 2, ELSEWHERE), 2, CAVE);
+    expect(form.exits).toEqual([]);
+  });
+
+  it.each([
+    ["a tree", 3],
+    ["water", 4],
+    ["a tile that is not on the map", 6],
+    ["a negative index", -1],
+  ])("does not put an exit on %s", (_label, index) => {
+    const form = bare();
+    expect(toggleExit(form, index, ELSEWHERE)).toBe(form);
+  });
+
+  it("points an exit somewhere else without moving it or touching the others", () => {
+    const two = toggleExit(toggleExit(bare(), 0, ELSEWHERE), 2, ELSEWHERE);
+    const repointed = setExitTarget(two, { x: 2, y: 0 }, CAVE);
+    expect(repointed.exits).toEqual([
+      { at: { x: 0, y: 0 }, to: ELSEWHERE },
+      { at: { x: 2, y: 0 }, to: CAVE },
+    ]);
+  });
+
+  it("leaves the form alone when asked to point an exit that is not there", () => {
+    const form = toggleExit(bare(), 0, ELSEWHERE);
+    expect(setExitTarget(form, { x: 2, y: 0 }, CAVE)).toBe(form);
+  });
+
+  it("does not let a tile with an exit on it be painted into something unwalkable", () => {
+    const form = toggleExit(bare(), 2, ELSEWHERE);
+    expect(paintTile(form, 2, "water")).toBe(form);
+    expect(paintTile(form, 2, "tree")).toBe(form);
+    // Another walkable kind is fine, and so is the same paint once the exit is gone.
+    expect(paintTile(form, 2, "path").tiles[2]).toBe("path");
+    expect(paintTile(toggleExit(form, 2, ELSEWHERE), 2, "water").tiles[2]).toBe("water");
+  });
+
+  it("does not change the form it was given", () => {
+    const form = bare();
+    toggleExit(form, 2, ELSEWHERE);
+    expect(form.exits).toEqual([]);
   });
 });

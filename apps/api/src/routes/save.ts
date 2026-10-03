@@ -2,7 +2,7 @@
  * Save routes — where the player is.
  *
  *   GET /api/save   the saved position, or the starting point if there is none
- *   PUT /api/save   store a position
+ *   PUT /api/save   store a position — on the map the player is already on
  *
  * There is no id in either path. Whose save it is comes from `getUserId(c)`,
  * never from the request (docs/04-api-design.md §認証と認可).
@@ -56,6 +56,17 @@ export function saveRoutes(db: Db) {
 
     const map = findMap(db, mapId);
     if (map === undefined) return c.json({ error: { kind: "unknown_map", mapId } }, 400);
+
+    // A save cannot change which map the player is on. That takes an exit, and
+    // going through one is the travel route's job (routes/travel.ts): there
+    // the destination comes from the server's own record, not from a request.
+    // "The map the player is on" is whatever `loadSave` says — the starting
+    // map for someone who has never saved, or whose map has been retired.
+    const current = loadSave(db, getUserId(c));
+    if (current === undefined) return c.json({ error: { kind: "no_start_map" } }, 500);
+    if (mapId !== current.mapId) {
+      return c.json({ error: { kind: "wrong_map", mapId, current: current.mapId } }, 400);
+    }
 
     // The browser moves the player with the same `step()` the server could
     // run, but its word is not taken for it: a position is stored only if it

@@ -19,11 +19,11 @@
  * no way forward. They are handled where they are read instead.
  */
 
-import { and, asc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 
 import { err, ok } from "@mba/core";
 import type { MasterReference, Result, RetireError } from "@mba/core";
-import { mapEncounters, maps, moves, skins, species, speciesMoves } from "@mba/db";
+import { mapEncounters, mapExits, maps, moves, skins, species, speciesMoves } from "@mba/db";
 import type { Db } from "@mba/db";
 
 import { DEFAULT_SKIN_ID } from "./appearance.js";
@@ -88,6 +88,33 @@ function mapsListing(db: Db, speciesId: string): MasterReference[] {
     .map((row) => ({ kind: "map", id: row.id, name: row.name }));
 }
 
+/** Live maps, other than the map itself, with an exit that leads onto it. */
+function mapsLeadingTo(db: Db, mapId: string): MasterReference[] {
+  const rows = db
+    .select({ id: maps.id, name: maps.name })
+    .from(mapExits)
+    .innerJoin(maps, eq(mapExits.mapId, maps.id))
+    .where(and(eq(mapExits.toMapId, mapId), ne(mapExits.mapId, mapId), isNull(maps.retiredAt)))
+    .orderBy(asc(maps.name), asc(maps.id))
+    .all();
+  // One map can have several exits to the same place; it is named once.
+  const once = new Map(rows.map((row) => [row.id, row]));
+  return [...once.values()].map((row) => ({ kind: "map", id: row.id, name: row.name }));
+}
+
+/** The retired maps a map's exits lead to. */
+function retiredBeyond(db: Db, mapId: string): MasterReference[] {
+  const rows = db
+    .select({ id: maps.id, name: maps.name })
+    .from(mapExits)
+    .innerJoin(maps, eq(mapExits.toMapId, maps.id))
+    .where(and(eq(mapExits.mapId, mapId), ne(mapExits.toMapId, mapId), isNotNull(maps.retiredAt)))
+    .orderBy(asc(maps.name), asc(maps.id))
+    .all();
+  const once = new Map(rows.map((row) => [row.id, row]));
+  return [...once.values()].map((row) => ({ kind: "map", id: row.id, name: row.name }));
+}
+
 /** The retired skin and moves a species refers to. */
 function retiredUnderSpecies(db: Db, speciesId: string): MasterReference[] {
   const skin = db
@@ -133,8 +160,8 @@ function whyNotRetire(db: Db, kind: Retirable, id: string): RetireError | undefi
         ? speciesWearing(db, id)
         : kind === "species"
           ? mapsListing(db, id)
-          : // Nothing in the master data refers to a map.
-            [];
+          : // What refers to a map is another map, through an exit.
+            mapsLeadingTo(db, id);
   return by.length === 0 ? undefined : { kind: "in_use", by };
 }
 
@@ -143,7 +170,7 @@ function whyNotRestore(db: Db, kind: Retirable, id: string): RetireError | undef
     kind === "species"
       ? retiredUnderSpecies(db, id)
       : kind === "maps"
-        ? retiredOnMap(db, id)
+        ? [...retiredOnMap(db, id), ...retiredBeyond(db, id)]
         : // A move and a skin refer to nothing.
           [];
   return on.length === 0 ? undefined : { kind: "depends_on_retired", on };

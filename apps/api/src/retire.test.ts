@@ -18,7 +18,7 @@ import type { Appearance, PaletteEntry, PartSlot } from "@mba/sprite";
 
 import { DEFAULT_SKIN_ID } from "./appearance.js";
 import { START_MAP_ID } from "./maps.js";
-import { firstTile, rolls, setup, starter } from "./testing.js";
+import { firstTile, rolls, setup, starter, visit } from "./testing.js";
 import type { TestApp } from "./testing.js";
 
 // ---------------------------------------------------------------------------
@@ -90,6 +90,7 @@ function pond(speciesIds: string[] = []): MapInput {
     tiles: ["path", "grass", "water", "path", "path", "tree"],
     spawn: { x: 0, y: 1 },
     encounters: speciesIds.map((speciesId) => ({ speciesId, weight: 1 })),
+    exits: [],
   };
 }
 
@@ -109,6 +110,7 @@ async function leaveOnStarter(app: TestApp, speciesIds: string[]): Promise<void>
     tiles: map.tiles,
     spawn: map.spawn,
     encounters: speciesIds.map((speciesId) => ({ speciesId, weight: 1 })),
+    exits: [],
   });
   if (res.status !== 200) throw new Error(`editing the starter map: ${await res.text()}`);
 }
@@ -345,7 +347,8 @@ describe("what players have does not stand in the way of a retire", () => {
   it("a save on the map", async () => {
     const { app } = setup();
     const id = await createMap(app);
-    await app.request("/api/save", json("PUT", { mapId: id, position: { x: 1, y: 0 } }));
+    await visit(app, id, { x: 1, y: 0 });
+    expect(await saved(app)).toEqual({ mapId: id, position: { x: 1, y: 0 } });
     expect((await setRetired(app, "maps", id, true)).status).toBe(200);
   });
 
@@ -569,7 +572,8 @@ describe("a retired map, as the game sees it", () => {
     const { app, db } = setup();
     const id = await createMap(app);
     const there: SaveData = { mapId: id, position: { x: 1, y: 0 } };
-    await app.request("/api/save", json("PUT", there));
+    await visit(app, id, there.position);
+    expect(await saved(app)).toEqual(there);
 
     await retire(app, "maps", id);
     expect(await saved(app)).toEqual({ mapId: START_MAP_ID, position: starter().spawn });
@@ -584,7 +588,7 @@ describe("a retired map, as the game sees it", () => {
     const { app } = setup({ random: rolls(0) });
     const id = await createMap(app, pond(["drop"]));
     // On the grass of the pond, where a battle could start.
-    await app.request("/api/save", json("PUT", { mapId: id, position: { x: 1, y: 0 } }));
+    await visit(app, id, { x: 1, y: 0 });
     expect((await app.request("/api/battles", { method: "POST" })).status).toBe(201);
 
     await retire(app, "maps", id);

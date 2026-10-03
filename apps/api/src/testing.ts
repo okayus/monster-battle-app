@@ -4,11 +4,11 @@
  * it, so it is not part of the build.
  */
 
-import type { GameMap, Position, TileKind } from "@mba/core";
+import type { AdminMap, GameMap, MapExit, Position, TileKind } from "@mba/core";
 import { createDb, runMigrations } from "@mba/db";
 
 import { createApp } from "./app.js";
-import { starterMap } from "./maps.js";
+import { START_MAP_ID, starterMap } from "./maps.js";
 import { seed } from "./seed.js";
 
 /**
@@ -49,4 +49,42 @@ export function firstTile(kind: TileKind): Position {
 export function rolls(...values: number[]): () => number {
   let next = 0;
   return () => values[Math.min(next++, values.length - 1)] ?? 0;
+}
+
+function json(method: string, body: unknown): RequestInit {
+  return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+/** Replaces the starter map's exits and leaves the rest of it as it is. */
+export async function setStarterExits(app: TestApp, exits: MapExit[]): Promise<void> {
+  const all = (await (await app.request("/api/admin/maps")).json()) as AdminMap[];
+  const start = all.find((map) => map.id === START_MAP_ID);
+  if (start === undefined) throw new Error("there is no starter map");
+  const { id: _id, retired: _retired, ...input } = start;
+  const res = await app.request(
+    `/api/admin/maps/${START_MAP_ID}`,
+    json("PUT", { ...input, exits }),
+  );
+  if (res.status !== 200) throw new Error(`editing the starter map: ${await res.text()}`);
+}
+
+/**
+ * Takes the player to a position on another map — the only way there is: an
+ * exit on the starter map that leads there, a save onto that exit, and a trip
+ * through it. The exit is taken away again afterwards, so the starter map is
+ * left as it was and nothing refers to the other map.
+ */
+export async function visit(app: TestApp, mapId: string, position: Position): Promise<void> {
+  const door = starter().spawn;
+  await setStarterExits(app, [{ at: door, to: { mapId, position } }]);
+
+  const stood = await app.request(
+    "/api/save",
+    json("PUT", { mapId: START_MAP_ID, position: door }),
+  );
+  if (stood.status !== 200) throw new Error(`standing on the exit: ${await stood.text()}`);
+  const travelled = await app.request("/api/travel", { method: "POST" });
+  if (travelled.status !== 200) throw new Error(`going through: ${await travelled.text()}`);
+
+  await setStarterExits(app, []);
 }

@@ -8,6 +8,7 @@ import {
   checkMap,
   checkMove,
   checkSpecies,
+  exitAt,
 } from "./index.js";
 import type { MapInput, SpeciesInput, TileKind } from "./index.js";
 
@@ -37,8 +38,14 @@ function mapInput(overrides: Partial<MapInput> = {}): MapInput {
     tiles,
     spawn: { x: 0, y: 0 },
     encounters: [{ speciesId: "moss", weight: 5 }],
+    exits: [{ at: { x: 1, y: 0 }, to: { mapId: "elsewhere", position: { x: 4, y: 4 } } }],
     ...overrides,
   };
+}
+
+/** An exit from a tile of the 3×2 fixture. Where it leads is not this package's to judge. */
+function exitFrom(x: number, y: number) {
+  return { at: { x, y }, to: { mapId: "elsewhere", position: { x: 0, y: 0 } } };
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +164,27 @@ describe("checkSpecies", () => {
   });
 });
 
+describe("exitAt", () => {
+  const exits = [
+    { at: { x: 1, y: 0 }, to: { mapId: "pond", position: { x: 0, y: 1 } } },
+    { at: { x: 2, y: 1 }, to: { mapId: "cave", position: { x: 3, y: 3 } } },
+  ];
+
+  it("finds the exit on a tile", () => {
+    expect(exitAt({ exits }, { x: 2, y: 1 })).toEqual(exits[1]);
+  });
+
+  it("finds nothing on a tile without one, or on a map with no way out", () => {
+    expect(exitAt({ exits }, { x: 1, y: 1 })).toBeUndefined();
+    expect(exitAt({ exits: [] }, { x: 1, y: 0 })).toBeUndefined();
+  });
+
+  it("goes by where the exit is, not by where it leads", () => {
+    // (0, 1) is where the first exit arrives, on another map.
+    expect(exitAt({ exits }, { x: 0, y: 1 })).toBeUndefined();
+  });
+});
+
 describe("checkMap", () => {
   it("accepts a map within every limit, and hands it back", () => {
     const input = mapInput();
@@ -171,6 +199,53 @@ describe("checkMap", () => {
 
   it("accepts a map nothing lives on", () => {
     expect(checkMap(mapInput({ encounters: [] })).ok).toBe(true);
+  });
+
+  it("accepts a map with no way out, and one with an exit on every tile that can be stood on", () => {
+    expect(checkMap(mapInput({ exits: [] })).ok).toBe(true);
+    // The fixture's walkable tiles: the top row, and the bottom-right corner.
+    const everywhere = [exitFrom(0, 0), exitFrom(1, 0), exitFrom(2, 0), exitFrom(2, 1)];
+    expect(checkMap(mapInput({ exits: everywhere })).ok).toBe(true);
+  });
+
+  it("leaves where an exit leads to the caller: any map id and any position pass here", () => {
+    const exits = [{ at: { x: 1, y: 0 }, to: { mapId: "", position: { x: -5, y: 99 } } }];
+    expect(checkMap(mapInput({ exits })).ok).toBe(true);
+  });
+
+  it.each([
+    ["on a tree", 0, 1],
+    ["in the water", 1, 1],
+    ["off the map", 3, 0],
+    ["between tiles", 0.5, 0],
+  ])("rejects an exit %s, where nobody could step onto it", (_label, x, y) => {
+    expect(checkMap(mapInput({ exits: [exitFrom(x, y)] }))).toEqual({
+      ok: false,
+      error: { kind: "bad_exit", at: { x, y } },
+    });
+  });
+
+  it("rejects two exits on one tile", () => {
+    expect(checkMap(mapInput({ exits: [exitFrom(1, 0), exitFrom(2, 0), exitFrom(1, 0)] }))).toEqual(
+      {
+        ok: false,
+        error: { kind: "duplicate_exit", at: { x: 1, y: 0 } },
+      },
+    );
+  });
+
+  it("rejects more exits than a map may have", () => {
+    const { maxWidth, maxExits } = MAP_LIMITS;
+    // One long row of path, so there is room for one exit too many.
+    const tiles = new Array<TileKind>(maxWidth).fill("path");
+    const exits = Array.from({ length: maxExits + 1 }, (_, x) => exitFrom(x, 0));
+    expect(checkMap(mapInput({ width: maxWidth, height: 1, tiles, exits }))).toEqual({
+      ok: false,
+      error: { kind: "too_many_exits", got: maxExits + 1, max: maxExits },
+    });
+    expect(
+      checkMap(mapInput({ width: maxWidth, height: 1, tiles, exits: exits.slice(1) })).ok,
+    ).toBe(true);
   });
 
   it.each([

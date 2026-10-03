@@ -56,6 +56,8 @@ describe("mapFromArt", () => {
         height: 2,
         tiles: ["grass", "path", "tree", "water"],
         spawn: { x: 1, y: 0 },
+        // A drawing cannot say where an exit leads, so it has none.
+        exits: [],
       },
     });
   });

@@ -64,6 +64,7 @@ function starterInput(overrides: Partial<MapInput> = {}): MapInput {
       { speciesId: "moss", weight: 5 },
       { speciesId: "rock", weight: 2 },
     ],
+    exits: [],
     ...overrides,
   };
 }
@@ -456,6 +457,7 @@ describe("POST /api/admin/maps", () => {
     tiles: ["path", "grass", "water", "path", "path", "tree"],
     spawn: { x: 0, y: 1 },
     encounters: [{ speciesId: "drop", weight: 1 }],
+    exits: [],
   };
 
   it("creates a map, and the game API serves it", async () => {

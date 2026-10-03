@@ -29,10 +29,12 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 
-import { TILE_KINDS, checkMap, checkMove, checkSpecies, err, ok } from "@mba/core";
+import { TILE_KINDS, canStandOn, checkMap, checkMove, checkSpecies, err, ok } from "@mba/core";
 import type {
   MapError,
+  MapExit,
   MapInput,
+  MasterReference,
   MoveError,
   MoveInput,
   Result,
@@ -43,7 +45,7 @@ import type { Db } from "@mba/db";
 
 import { requireAdmin } from "../auth.js";
 import { jsonBodyLimit, parseShape, readJson } from "../http.js";
-import { findAdminMap, listMaps, saveMap } from "../maps.js";
+import { exitsInto, findAdminMap, listMaps, saveMap } from "../maps.js";
 import {
   findAdminSpecies,
   findMove,
@@ -87,6 +89,15 @@ const mapSchema: z.ZodType<MapInput> = z.object({
   tiles: z.array(z.enum(TILE_KINDS)),
   spawn: z.object({ x: z.number(), y: z.number() }),
   encounters: z.array(z.object({ speciesId: z.string(), weight: z.number() })),
+  exits: z.array(
+    z.object({
+      at: z.object({ x: z.number(), y: z.number() }),
+      to: z.object({
+        mapId: z.string(),
+        position: z.object({ x: z.number(), y: z.number() }),
+      }),
+    }),
+  ),
 });
 
 const moveSchema: z.ZodType<MoveInput> = z.object({
@@ -103,10 +114,16 @@ type InputError =
   | { kind: "unknown_skin"; skinId: string }
   | { kind: "unknown_move"; moveId: string }
   | { kind: "unknown_species"; speciesId: string }
+  | { kind: "unknown_map"; mapId: string }
   /** … or it does, and has been retired: nothing new may point at it. */
   | { kind: "retired_skin"; skinId: string }
   | { kind: "retired_move"; moveId: string }
-  | { kind: "retired_species"; speciesId: string };
+  | { kind: "retired_species"; speciesId: string }
+  | { kind: "retired_map"; mapId: string }
+  /** An exit has to arrive on a tile of the other map that can be stood on. */
+  | { kind: "bad_exit_destination"; exit: MapExit }
+  /** Redrawing this map would put something unwalkable where another map's exit arrives. */
+  | { kind: "blocks_exit"; by: MasterReference[] };
 
 export function adminRoutes(db: Db) {
   const routes = new Hono();
@@ -182,7 +199,15 @@ export function adminRoutes(db: Db) {
   // Maps
   // -------------------------------------------------------------------------
 
-  async function readMap(c: Context): Promise<Result<MapInput, InputError | MapError>> {
+  /**
+   * `id` is the map being replaced, or undefined for one that is being
+   * created. It matters for exits, which are the one thing in a map that can
+   * refer to the map itself — and to which other maps refer.
+   */
+  async function readMap(
+    c: Context,
+    id?: string,
+  ): Promise<Result<MapInput, InputError | MapError>> {
     const body = await readJson(c);
     if (!body.ok) return body;
     const shape = parseShape(mapSchema, body.value);
@@ -202,6 +227,37 @@ export function adminRoutes(db: Db) {
         speciesId: kind.id,
       });
     }
+
+    // Where the exits lead. An exit back onto this same map is judged against
+    // the tiles being saved, not the ones in the database.
+    const elsewhere = input.exits.filter((exit) => exit.to.mapId !== id);
+    const target = firstUnusable(
+      db,
+      "maps",
+      elsewhere.map((exit) => exit.to.mapId),
+    );
+    if (target !== undefined) {
+      return err({
+        kind: target.why === "missing" ? "unknown_map" : "retired_map",
+        mapId: target.id,
+      });
+    }
+    for (const exit of input.exits) {
+      const far = exit.to.mapId === id ? input : findAdminMap(db, exit.to.mapId);
+      if (far === undefined || !canStandOn(far, exit.to.position)) {
+        return err({ kind: "bad_exit_destination", exit });
+      }
+    }
+
+    // And the exits that lead here, from other maps. They live in those maps'
+    // data, so this edit cannot fix them — it can only not break them.
+    if (id !== undefined) {
+      const blocked = exitsInto(db, id).filter((exit) => !canStandOn(input, exit.lands));
+      if (blocked.length > 0) {
+        const by = new Map(blocked.map((exit) => [exit.from.id, exit.from]));
+        return err({ kind: "blocks_exit", by: [...by.values()] });
+      }
+    }
     return ok(input);
   }
 
@@ -220,7 +276,7 @@ export function adminRoutes(db: Db) {
     const id = c.req.param("id");
     if (findAdminMap(db, id) === undefined) return c.json({ error: { kind: "not_found" } }, 404);
 
-    const input = await readMap(c);
+    const input = await readMap(c, id);
     if (!input.ok) return c.json({ error: input.error }, 400);
 
     saveMap(db, id, input.value);

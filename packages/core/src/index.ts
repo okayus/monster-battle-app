@@ -76,12 +76,25 @@ export interface TileMap {
   tiles: readonly TileKind[];
 }
 
+/**
+ * A way out of a map: a player who steps onto `at` can go to `to`.
+ *
+ * One way only. A door that can be walked through in both directions is two
+ * exits, one on each map.
+ */
+export interface MapExit {
+  at: Position;
+  to: { mapId: string; position: Position };
+}
+
 /** Master data for one map: the grid, plus what it takes to put a player on it. */
 export interface GameMap extends TileMap {
   id: string;
   name: string;
   /** Where a player with no save starts. Always a tile that can be stood on. */
   spawn: Position;
+  /** The ways out of this map. At most one per tile. */
+  exits: MapExit[];
 }
 
 /** Where a player is. This is what `/api/save` reads and writes. */
@@ -112,6 +125,15 @@ export function tileAt(map: TileMap, at: Position): TileKind | undefined {
 export function canStandOn(map: TileMap, at: Position): boolean {
   const kind = tileAt(map, at);
   return kind !== undefined && isWalkable(kind);
+}
+
+/**
+ * The exit on the tile at this position, if there is one. The browser asks
+ * this to know when the player is standing on a way out; the server asks it,
+ * about the position it has stored, before it lets anyone through.
+ */
+export function exitAt(map: Pick<GameMap, "exits">, at: Position): MapExit | undefined {
+  return map.exits.find((exit) => exit.at.x === at.x && exit.at.y === at.y);
 }
 
 /**
@@ -533,6 +555,7 @@ export const MAP_LIMITS = {
   maxHeight: 32,
   /** Upper bound for an encounter weight. The lower bound is 1. */
   maxWeight: 100,
+  maxExits: 16,
 } as const;
 
 /** One line of "who turns up on this map": a species and its weight. */
@@ -549,6 +572,7 @@ export interface MapInput {
   tiles: TileKind[];
   spawn: Position;
   encounters: Encounter[];
+  exits: MapExit[];
 }
 
 /** A map as the admin screen edits it: the grid, who turns up on it, and whether it is in use. */
@@ -564,11 +588,18 @@ export type MapError =
   /** The spawn has to be a tile a player can stand on, or a new game starts stuck. */
   | { kind: "bad_spawn"; spawn: Position }
   | { kind: "bad_weight"; speciesId: string; weight: number }
-  | { kind: "duplicate_encounter"; speciesId: string };
+  | { kind: "duplicate_encounter"; speciesId: string }
+  | { kind: "too_many_exits"; got: number; max: number }
+  /** An exit has to be on a tile a player can step onto, or nobody can take it. */
+  | { kind: "bad_exit"; at: Position }
+  /** Two exits on one tile would leave it to chance which one is taken. */
+  | { kind: "duplicate_exit"; at: Position };
 
 /**
  * The rules a map has to satisfy. As with species, whether the species it
- * names exist is left to the caller.
+ * names exist is left to the caller — and so is where its exits lead: whether
+ * the map on the other side exists, and whether the tile there can be stood
+ * on, depends on that other map.
  */
 export function checkMap(input: MapInput): Result<MapInput, MapError> {
   if (!isName(input.name, MAP_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
@@ -592,6 +623,17 @@ export function checkMap(input: MapInput): Result<MapInput, MapError> {
     }
     if (seen.has(speciesId)) return err({ kind: "duplicate_encounter", speciesId });
     seen.add(speciesId);
+  }
+
+  if (input.exits.length > MAP_LIMITS.maxExits) {
+    return err({ kind: "too_many_exits", got: input.exits.length, max: MAP_LIMITS.maxExits });
+  }
+  const taken = new Set<string>();
+  for (const { at } of input.exits) {
+    if (!canStandOn(input, at)) return err({ kind: "bad_exit", at });
+    const tile = `${at.x},${at.y}`;
+    if (taken.has(tile)) return err({ kind: "duplicate_exit", at });
+    taken.add(tile);
   }
   return ok(input);
 }

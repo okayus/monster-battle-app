@@ -23,6 +23,7 @@ import { battleRoutes } from "./routes/battles.js";
 import { mapRoutes } from "./routes/maps.js";
 import { saveRoutes } from "./routes/save.js";
 import { skinRoutes } from "./routes/skins.js";
+import { travelRoutes } from "./routes/travel.js";
 
 export interface AppDeps {
   db: Db;
@@ -44,6 +45,7 @@ export function createApp({ db, migrationsApplied, random }: AppDeps) {
   app.route("/api/skins", skinRoutes(db));
   app.route("/api/maps", mapRoutes(db));
   app.route("/api/save", saveRoutes(db));
+  app.route("/api/travel", travelRoutes(db));
   app.route("/api/appearance", appearanceRoutes(db));
   app.route("/api/battles", battleRoutes(db, random));
 
