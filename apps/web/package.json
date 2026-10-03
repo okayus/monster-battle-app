@@ -8,6 +8,7 @@
     "build": "vp build",
     "preview": "vp preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vp test run",
     "lint": "vp lint -c ../../.oxlintrc.json --deny-warnings",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check"
