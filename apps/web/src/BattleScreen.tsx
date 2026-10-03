@@ -2,9 +2,15 @@
  * The battle screen.
  *
  * It decides one thing: which move to use. Everything else it shows — health,
- * what each hit did, who won — is what the server said. There is no damage
- * formula on this side and no check for "has someone fainted"; the screen
- * draws the state it was last given and waits to be given the next one.
+ * what each hit did, who won, what the win was worth — is what the server
+ * said. There is no damage formula on this side, no check for "has someone
+ * fainted" and no sum of experience; the screen draws the state it was last
+ * given and waits to be given the next one.
+ *
+ * What a battle leaves behind is not written from here either. By the time
+ * this screen says "won", the monster already has its experience; by the time
+ * it says "lost", the player has already been put back at the start. The
+ * screen only says so.
  */
 
 import { useEffect, useState } from "react";
@@ -77,7 +83,9 @@ function Fighter({
 }) {
   return (
     <div style={card} role="group" aria-label={label}>
-      <strong>{name}</strong>
+      <span>
+        <strong>{name}</strong> <span data-level>Lv {fighter.level}</span>
+      </span>
       <MonsterSprite skinId={fighter.skinId} />
       <progress value={fighter.hp} max={fighter.maxHp} aria-label={`${label}の HP`} />
       <span>
@@ -140,10 +148,20 @@ function Battle({ initial }: { initial: BattleView }) {
           ))}
         </div>
       ) : (
-        <p>
-          <strong role="status">{battle.status === "won" ? "勝った！" : "負けてしまった…"}</strong>{" "}
-          <a href={hrefs.map}>マップに戻る</a>
-        </p>
+        <>
+          <p>
+            <strong role="status">
+              {battle.status === "won" ? "勝った！" : "負けてしまった…"}
+            </strong>{" "}
+            <a href={hrefs.map}>マップに戻る</a>
+          </p>
+          {/* What the server has already done. Nothing here makes it happen. */}
+          <p data-aftermath>
+            {battle.status === "won"
+              ? "減った HP は、次のバトルに持ち越す。"
+              : `${names.player} は げんきになり、はじまりの場所に戻された。`}
+          </p>
+        </>
       )}
 
       {error !== null && <p role="alert">技を出せなかった（{error.kind}）</p>}

@@ -4,6 +4,9 @@
  * Everything on it is what the server said. A monster arrives with its level
  * and its health already worked out, and there is no growth curve on this
  * side to work them out with: the screen draws the numbers it was given.
+ *
+ * A monster in the middle of a battle links to it. The health shown beside
+ * the link is what it went in with; what it has left is the battle's to say.
  */
 
 import { useEffect, useState } from "react";
@@ -15,6 +18,7 @@ import { fetchMonsters } from "./api.js";
 import type { ApiError } from "./api.js";
 import { describeProgress } from "./monster-text.js";
 import { MonsterSprite } from "./MonsterSprite.js";
+import { hrefs } from "./route.js";
 
 type LoadState =
   | { kind: "loading" }
@@ -63,6 +67,11 @@ export function MonstersScreen() {
           ))}
         </ul>
       )}
+      <p>
+        バトルに勝つと経験値が入る。減った HP は次のバトルに持ち越す。
+        <br />
+        負けると げんきになり、はじまりの場所に戻される。
+      </p>
     </section>
   );
 }
@@ -100,6 +109,9 @@ function Monster({ monster }: { monster: MonsterView }) {
         <span>
           技: {monster.moves.map((move) => `${move.name}（威力 ${move.power}）`).join("・")}
         </span>
+        {monster.battleId !== null && (
+          <a href={hrefs.battle(monster.battleId)}>バトルの途中。つづきへ</a>
+        )}
       </div>
     </>
   );
