@@ -17,6 +17,7 @@ import { createDb, runMigrations } from "@mba/db";
 
 import { createApp } from "./app.js";
 import { ensureLocalUser } from "./auth.js";
+import { ensureStarterMap } from "./maps.js";
 
 const DATABASE_URL = process.env.DATABASE_URL ?? "file:./data/app.db";
 const PORT = Number(process.env.PORT ?? 3000);
@@ -26,6 +27,14 @@ const db = createDb(DATABASE_URL);
 // production container needs no separate migrate step.
 const { applied } = runMigrations(db);
 ensureLocalUser(db);
+
+const seeded = ensureStarterMap(db);
+if (!seeded.ok) {
+  // The starter map is part of the source. If its drawing is malformed, that
+  // is a bug to fix before serving anything, not a state to keep running in.
+  console.error("the starter map is invalid:", seeded.error);
+  process.exit(1);
+}
 
 const app = createApp({ db, migrationsApplied: applied });
 

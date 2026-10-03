@@ -1,28 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { createDb, runMigrations, skins } from "@mba/db";
+import { skins } from "@mba/db";
 import { CELLS_PER_FRAME, PART_SLOTS, SKIN_SPEC, parseSkin, toRenderable } from "@mba/sprite";
 import type { RenderableSkin, Skin } from "@mba/sprite";
 
-import { createApp } from "./app.js";
-import { LOCAL_USER_ID, ensureLocalUser } from "./auth.js";
+import { LOCAL_USER_ID } from "./auth.js";
+import { setup } from "./testing.js";
+import type { TestApp as App } from "./testing.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * A fresh in-memory database per test, brought up the way a real boot does it
- * — by the committed migration files — so the SQL is under test as well.
- */
-function setup() {
-  const db = createDb(":memory:");
-  const { applied } = runMigrations(db);
-  ensureLocalUser(db);
-  return { db, applied, app: createApp({ db, migrationsApplied: applied }) };
-}
-
-type App = ReturnType<typeof setup>["app"];
 
 /** A structurally valid payload, as it would arrive from the editor. */
 function validInput(): Record<string, unknown> {

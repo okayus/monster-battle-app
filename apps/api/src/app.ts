@@ -17,6 +17,8 @@ import { Hono } from "hono";
 
 import type { Db } from "@mba/db";
 
+import { mapRoutes } from "./routes/maps.js";
+import { saveRoutes } from "./routes/save.js";
 import { skinRoutes } from "./routes/skins.js";
 
 export interface AppDeps {
@@ -31,9 +33,11 @@ export function createApp({ db, migrationsApplied }: AppDeps) {
   app.get("/api/health", (c) => c.json({ status: "ok", migrationsApplied }));
 
   app.route("/api/skins", skinRoutes(db));
+  app.route("/api/maps", mapRoutes(db));
+  app.route("/api/save", saveRoutes(db));
 
-  // TODO: player game API      — see docs/04-api-design.md §ゲーム API
-  // TODO: /api/admin/*         — see docs/04-api-design.md §管理 API
+  // TODO: the rest of the game API — see docs/04-api-design.md §ゲーム API
+  // TODO: /api/admin/*              — see docs/04-api-design.md §管理 API
 
   return app;
 }

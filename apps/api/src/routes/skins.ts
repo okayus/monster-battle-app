@@ -12,24 +12,13 @@
 
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import type { Context } from "hono";
-import { bodyLimit } from "hono/body-limit";
 
 import { skins } from "@mba/db";
 import type { Db } from "@mba/db";
-import { SKIN_SPEC, err, ok, parseSkin, toRenderable } from "@mba/sprite";
-import type { Result } from "@mba/sprite";
+import { SKIN_SPEC, parseSkin, toRenderable } from "@mba/sprite";
 
 import { getUserId } from "../auth.js";
-
-/** `c.req.json()` throws on a body that is not JSON. Here that becomes a value. */
-async function readJson(c: Context): Promise<Result<unknown, { kind: "bad_json" }>> {
-  try {
-    return ok(await c.req.json());
-  } catch {
-    return err({ kind: "bad_json" });
-  }
-}
+import { jsonBodyLimit, readJson } from "../http.js";
 
 export function skinRoutes(db: Db) {
   const routes = new Hono();
@@ -41,10 +30,7 @@ export function skinRoutes(db: Db) {
     // is parsed. `parseSkin` has its own cap (same number) on what may be
     // *stored*; that one cannot protect the process, because by the time it
     // runs the body is already in memory.
-    bodyLimit({
-      maxSize: SKIN_SPEC.maxBytes,
-      onError: (c) => c.json({ error: { kind: "body_too_large", max: SKIN_SPEC.maxBytes } }, 413),
-    }),
+    jsonBodyLimit(SKIN_SPEC.maxBytes),
     async (c) => {
       const body = await readJson(c);
       if (!body.ok) return c.json({ error: body.error }, 400);
