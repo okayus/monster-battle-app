@@ -32,8 +32,8 @@ dev コンテナで同じ検査を回すのとの違いは、**まっさらな�
 
 | 段 | 道具 | 相手 | 件数 |
 |---|---|---|---|
-| 単体・API | Vitest | 純粋関数と、インメモリの SQLite を渡した API（`app.request()`） | 425 |
-| 画面 | Playwright と Chromium | 本番イメージのコンテナ | 34 |
+| 単体・API | Vitest | 純粋関数と、インメモリの SQLite を渡した API（`app.request()`） | 538 |
+| 画面 | Playwright と Chromium | 本番イメージのコンテナ | 44 |
 
 **規則は下の段で、組み立ては上の段で確かめる。** ダメージの式、スキンの検証、マップの規則は、単体テストが決め打ちの入力で
 隅まで見ている。画面のテストはそれをやり直さない。見るのは部品がつながっていること——ボタンを押すとリクエストが飛び、
@@ -134,9 +134,23 @@ lockfile を持つ。Docker のビルドコンテキストも別（アプリ側�
 | スプライトを CSS 変数でなく色そのもので塗る | `tries parts and colours on without changing the drawing` |
 | コマの長さの欄が、前のコマの値を出したままになる | `adds, times and removes frames` |
 | 開始位置のタイルを木で塗れるようにする | `paints a map, keeps the spawn standable, and the game serves what was saved` |
+| マップが、1 歩ごとに見た目を取り直す | `is fetched once, not again for every step` |
+| マップの自分を、ただの丸のままにする | `starts as the default skin, drawn on the map where the marker was` ほか 4 本 |
+| マップが、色を付けずに見た目を描く | `dyes a colour, and leaves the skin as it was drawn` ほか 1 本 |
+| パーツの差し替えを無視して、全部を着ているスキンから組む | `takes a part from another skin, with the colours that part is painted in` ほか 2 本 |
+| `<Sprite>` が、色の CSS 変数を付けない | `dyes a colour, and leaves the skin as it was drawn` ほか 4 本 |
+| その見た目に無い色も、レシピに入れて送る | `sends only the colours that apply, and keeps the others for when they do again` |
+| 選び直した後も「保存した」を出したままにする | `stops saying it is saved once something is changed` |
+| パレットにある色を全部、色の欄に出す | `offers the colours the look is painted with, and no others` ほか 2 本 |
+| サーバに断られても、何も出さない | `says so when the server refuses, and the look stays as it was` |
+| レシピを保存せずに 200 を返す | `wears the skin chosen on the dressing screen, on the map and after a reload` ほか 5 本 |
 
 `check` の方も同じように確かめてある。型エラー、lint 違反、整形されていない行、成り立たなくなった単体テストは、
 それぞれ自分の `RUN` で落ちる。
+
+**単体テストも同じ。** 検査を 1 つ外す、条件を 1 つ緩める、といった壊し方を 1 つずつ入れて、そのパッケージのテストを回す。
+画面のテストと違って 1 回が数秒なので、検査の数だけ試せる。Step 9 では `parseAppearance()` の検査と
+見た目の API の検査を 1 つずつ外して、どれも落ちることを見た。
 
 ## 日々の操作
 
