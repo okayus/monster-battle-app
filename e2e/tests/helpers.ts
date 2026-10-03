@@ -38,11 +38,21 @@ async function centreOf(locator: Locator): Promise<Position> {
 /**
  * A real mouse stroke: press on one element, drag to another, release. The
  * drag goes through enough points that nothing in between is skipped.
+ *
+ * The start of the stroke is brought to the middle of the window first.
+ * Scrolled only as far as needed it can end up on the window's bottom edge,
+ * and then the rest of the stroke is below it: a real mouse cannot press what
+ * is not on screen, and the stroke would quietly paint less than it was asked
+ * to. Where the stroke ends is checked for the same reason.
  */
 export async function stroke(page: Page, from: Locator, to: Locator): Promise<void> {
-  await from.scrollIntoViewIfNeeded();
+  await from.evaluate((element) => element.scrollIntoView({ block: "center", inline: "center" }));
   const start = await centreOf(from);
   const end = await centreOf(to);
+  const view = page.viewportSize();
+  if (view !== null && (end.x < 0 || end.y < 0 || end.x >= view.width || end.y >= view.height)) {
+    throw new Error(`the stroke would end outside the window, at (${end.x}, ${end.y})`);
+  }
   await page.mouse.move(start.x, start.y);
   await page.mouse.down();
   await page.mouse.move(end.x, end.y, { steps: 32 });
@@ -146,4 +156,97 @@ export async function playerOnTheMap(page: Page): Promise<Locator> {
   const player = page.getByRole("region", { name: "マップ" }).locator("[data-player]");
   await expect(player.locator("svg rect").first()).toBeAttached();
   return player;
+}
+
+// ---------------------------------------------------------------------------
+// Maps and the ways between them
+// ---------------------------------------------------------------------------
+
+export interface MapExit {
+  at: Position;
+  to: { mapId: string; position: Position };
+}
+
+interface AdminMap {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  tiles: string[];
+  spawn: Position;
+  encounters: { speciesId: string; weight: number }[];
+  exits: MapExit[];
+  retired: boolean;
+}
+
+/**
+ * Makes a small map through the admin API and returns its id:
+ *
+ *     . g w      (0,0) path   (1,0) grass   (2,0) water
+ *     @ . T      (0,1) spawn  (1,1) path    (2,1) tree
+ */
+export async function createPond(
+  request: APIRequestContext,
+  name: string,
+  options: { speciesIds?: string[]; exits?: MapExit[] } = {},
+): Promise<string> {
+  const response = await request.post("/api/admin/maps", {
+    data: {
+      name,
+      width: 3,
+      height: 2,
+      tiles: ["path", "grass", "water", "path", "path", "tree"],
+      spawn: { x: 0, y: 1 },
+      encounters: (options.speciesIds ?? []).map((speciesId) => ({ speciesId, weight: 1 })),
+      exits: options.exits ?? [],
+    },
+  });
+  expect(response.status(), `POST a map (${name})`).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+}
+
+/** Replaces the starter map's exits, and leaves the rest of it as it is. */
+export async function setStarterExits(request: APIRequestContext, exits: MapExit[]): Promise<void> {
+  const all = (await (await request.get("/api/admin/maps")).json()) as AdminMap[];
+  const start = all.find((map) => map.id === "start");
+  if (start === undefined) throw new Error("there is no starter map");
+  const { id: _id, retired: _retired, ...input } = start;
+  const response = await request.put("/api/admin/maps/start", { data: { ...input, exits } });
+  expect(response.ok(), "PUT the starter map's exits").toBe(true);
+}
+
+/** The exits the starter map has right now. */
+export async function starterExits(request: APIRequestContext): Promise<MapExit[]> {
+  const all = (await (await request.get("/api/admin/maps")).json()) as AdminMap[];
+  return all.find((map) => map.id === "start")?.exits ?? [];
+}
+
+/** Retires something through the admin API, or brings it back. */
+export async function setRetired(
+  request: APIRequestContext,
+  kind: "species" | "moves" | "maps" | "skins",
+  id: string,
+  retired: boolean,
+): Promise<void> {
+  const response = await request.put(`/api/admin/${kind}/${id}/retired`, { data: { retired } });
+  expect(response.ok(), `${retired ? "retiring" : "restoring"} ${kind}/${id}`).toBe(true);
+}
+
+/**
+ * Takes the player to a position on another map the only way there is: an
+ * exit on the starter map that leads there, a save onto that exit, and a trip
+ * through it. The exit is taken away again, so the starter map is left as it
+ * was for the next test.
+ */
+export async function visit(
+  request: APIRequestContext,
+  mapId: string,
+  position: Position,
+): Promise<void> {
+  const door = { x: 1, y: 1 };
+  await setStarterExits(request, [{ at: door, to: { mapId, position } }]);
+  await standAt(request, door.x, door.y);
+  const travelled = await request.post("/api/travel");
+  expect(travelled.ok(), "POST /api/travel").toBe(true);
+  await setStarterExits(request, []);
 }

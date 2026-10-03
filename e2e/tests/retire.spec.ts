@@ -12,11 +12,14 @@ import type { APIRequestContext, Locator, Page } from "@playwright/test";
 
 import {
   DEFAULT_LOOK,
+  createPond,
   drawBars,
   failOnPageErrors,
   playerOnTheMap,
   rows,
+  setRetired,
   standAt,
+  visit,
   wear,
   worn,
 } from "./helpers.js";
@@ -57,33 +60,6 @@ function createSpecies(
       data: { name, maxHp: 20, attack: 10, defense: 10, skinId: "species-moss", moveIds },
     })
     .then((response) => created(response, `POST a species (${name})`));
-}
-
-/** A 3×2 map with grass on it, and whoever is named turning up there. */
-function createMap(
-  request: APIRequestContext,
-  name: string,
-  speciesIds: string[],
-): Promise<string> {
-  return request
-    .post("/api/admin/maps", {
-      data: {
-        name,
-        width: 3,
-        height: 2,
-        tiles: ["path", "grass", "water", "path", "path", "tree"],
-        spawn: { x: 0, y: 1 },
-        encounters: speciesIds.map((speciesId) => ({ speciesId, weight: 1 })),
-      },
-    })
-    .then((response) => created(response, `POST a map (${name})`));
-}
-
-async function retireByApi(request: APIRequestContext, kind: string, id: string): Promise<void> {
-  const response = await request.put(`/api/admin/${kind}/${id}/retired`, {
-    data: { retired: true },
-  });
-  expect(response.ok(), `retiring ${kind}/${id}`).toBe(true);
 }
 
 /** Opens an admin screen and waits for its list. */
@@ -169,7 +145,7 @@ test.describe("retiring", () => {
     const speciesName = `イケダマ-${RUN}`;
     const mapName = `ためいけ-${RUN}`;
     const kind = await createSpecies(request, speciesName, ["bump"]);
-    await createMap(request, mapName, [kind]);
+    await createPond(request, mapName, { speciesIds: [kind] });
     const mapForm = page.getByRole("form", { name: "マップのフォーム" });
 
     await choose(page, "species", speciesName);
@@ -202,8 +178,8 @@ test.describe("retiring", () => {
     const move = await createMove(request, moveName);
     const kind = await createSpecies(request, speciesName, [move]);
     // The species first: once it is retired, nothing in use knows the move.
-    await retireByApi(request, "species", kind);
-    await retireByApi(request, "moves", move);
+    await setRetired(request, "species", kind, true);
+    await setRetired(request, "moves", move, true);
 
     await choose(page, "species", speciesName);
     await control(page).getByRole("button", { name: "戻す" }).click();
@@ -260,11 +236,9 @@ test.describe("retiring", () => {
     request,
   }) => {
     const mapName = `こいけ-${RUN}`;
-    const map = await createMap(request, mapName, []);
-    const saved = await request.put("/api/save", {
-      data: { mapId: map, position: { x: 1, y: 0 } },
-    });
-    expect(saved.ok()).toBe(true);
+    const map = await createPond(request, mapName);
+    // Through an exit: a save cannot put a player on another map.
+    await visit(request, map, { x: 1, y: 0 });
     const mapScreen = page.getByRole("region", { name: "マップ" });
 
     await page.goto("/");
@@ -288,6 +262,9 @@ test.describe("retiring", () => {
     await expect(mapScreen.getByRole("heading")).toHaveText(mapName);
     await expect(mapScreen.getByText("現在地:")).toContainText("(1, 0)");
 
+    // Leave the player where the other tests expect them. Retiring the map
+    // again is the way back: a save cannot change maps either.
+    await setRetired(request, "maps", map, true);
     await standAt(request, 1, 1);
   });
 
