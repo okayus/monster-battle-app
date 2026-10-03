@@ -1,0 +1,7 @@
+# Read by `vp fmt`. The formatter (oxfmt) honours .prettierignore by default;
+# there is no Prettier in this repo.
+#
+# drizzle/ is written by `drizzle-kit generate`, which also rewrites
+# meta/_journal.json on every run. Formatting generated files would only make
+# each new migration fight the formatter.
+drizzle/
