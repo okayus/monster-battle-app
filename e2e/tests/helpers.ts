@@ -58,3 +58,92 @@ export function failOnPageErrors(page: Page): void {
     throw new Error(`the page threw: ${error.message}`);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Skins and looks
+// ---------------------------------------------------------------------------
+
+export const SLOTS = ["body", "shirt", "pants", "shoes", "hair"] as const;
+export type Slot = (typeof SLOTS)[number];
+
+export interface PaletteEntry {
+  id: string;
+  hex: string;
+}
+
+export interface Appearance {
+  skinId: string;
+  parts: Partial<Record<Slot, string>>;
+  colours: PaletteEntry[];
+}
+
+/** What a player who never chose anything looks like. */
+export const DEFAULT_LOOK: Appearance = { skinId: "player-default", parts: {}, colours: [] };
+
+/**
+ * Saves a skin made of bars through the API, the way the editor would, and
+ * returns its id. Each part is one row of one colour: part n is painted with
+ * the palette's n-th colour, on row `firstRow + n`. Which skin a part on the
+ * page came from can then be read off as which row its bar is on.
+ */
+export async function drawBars(
+  request: APIRequestContext,
+  name: string,
+  palette: PaletteEntry[],
+  firstRow: number,
+): Promise<string> {
+  const response = await request.post("/api/skins", {
+    data: {
+      formatVersion: 1,
+      name,
+      palette,
+      parts: SLOTS.map((slot, i) => ({
+        slot,
+        frames: [
+          {
+            durationMs: 120,
+            cells: [
+              [0, (firstRow + i) * 16],
+              [i + 1, 16],
+              [0, (15 - firstRow - i) * 16],
+            ].filter(([, length]) => length !== 0),
+          },
+        ],
+      })),
+    },
+  });
+  expect(response.status(), `POST /api/skins (${name})`).toBe(201);
+  return ((await response.json()) as { id: string }).id;
+}
+
+/** Dresses the player, the way a visit to the dressing screen would have. */
+export async function wear(request: APIRequestContext, appearance: Appearance): Promise<void> {
+  const response = await request.put("/api/appearance", { data: appearance });
+  expect(response.ok(), "PUT /api/appearance").toBe(true);
+}
+
+/** What the server says the player is wearing. */
+export async function worn(request: APIRequestContext): Promise<Appearance> {
+  const response = await request.get("/api/appearance");
+  expect(response.ok(), "GET /api/appearance").toBe(true);
+  return (await response.json()) as Appearance;
+}
+
+/** Which row each part's first rect is on, in draw order: what a sprite on the page is showing. */
+export async function rows(sprite: Locator): Promise<Record<string, number>> {
+  return sprite.locator("g[data-part]").evaluateAll((groups) => {
+    const found: Record<string, number> = {};
+    for (const group of groups) {
+      const rect = group.querySelector("rect");
+      found[(group as SVGGElement).dataset.part ?? ""] = Number(rect?.getAttribute("y"));
+    }
+    return found;
+  });
+}
+
+/** The player on the map, once the look has replaced the plain marker. */
+export async function playerOnTheMap(page: Page): Promise<Locator> {
+  const player = page.getByRole("region", { name: "マップ" }).locator("[data-player]");
+  await expect(player.locator("svg rect").first()).toBeAttached();
+  return player;
+}

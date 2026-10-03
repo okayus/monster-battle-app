@@ -1,5 +1,5 @@
 /**
- * The admin app: species and maps.
+ * The admin app: species, moves and maps.
  *
  * It lives under /admin and talks to /api/admin. Both paths are the same
  * origin as the player app in production, which is part of what these tests
@@ -34,6 +34,7 @@ interface AdminMap {
 const RUN = Date.now().toString(36);
 const SPECIES_NAME = `テストダマ-${RUN}`;
 const MAP_NAME = `テストの原っぱ-${RUN}`;
+const MOVE_NAME = `つつく-${RUN}`;
 
 function speciesList(page: Page): Locator {
   return page.getByRole("list", { name: "種族の一覧" });
@@ -153,6 +154,61 @@ test.describe("the admin app", () => {
     expect(stored?.moves.map((move) => move.id)).toEqual(["bite", "fling"]);
   });
 
+  test("creates a move, changes it, and offers it to species", async ({ page, request }) => {
+    await page.getByRole("navigation").getByRole("link", { name: "技", exact: true }).click();
+    const list = page.getByRole("list", { name: "技の一覧" });
+    const form = page.getByRole("form", { name: "技のフォーム" });
+    const save = form.getByRole("button", { name: "保存", exact: true });
+    const created = list.getByRole("listitem").filter({ hasText: MOVE_NAME });
+
+    /** Every write this page makes to the moves, as "METHOD power". */
+    const written: string[] = [];
+    page.on("request", (sent) => {
+      if (sent.method() === "GET" || !sent.url().includes("/api/admin/moves")) return;
+      written.push(`${sent.method()} ${(sent.postDataJSON() as { power: number }).power}`);
+    });
+
+    // What ships with the game is there to begin with.
+    await expect(list.getByRole("listitem").filter({ hasText: "かじる" })).toContainText("威力 6");
+
+    await page.getByRole("button", { name: "新しい技" }).click();
+    await form.getByLabel("名前").fill(MOVE_NAME);
+    await form.getByLabel("威力").fill("4");
+    await save.click();
+    await expect(form.getByRole("status")).toHaveText("保存した");
+    await expect(created).toContainText("威力 4");
+
+    await form.getByLabel("威力").fill("9");
+    await save.click();
+    await expect(created).toContainText("威力 9");
+
+    // A power of 0 does not leave the browser: the field's own limit stops the
+    // form. That is a courtesy to the admin, not the check.
+    await form.getByLabel("威力").fill("0");
+    await save.click();
+    await form.getByLabel("威力").fill("9");
+
+    // What the form cannot see coming is refused by the server, and shown as it came.
+    await form.getByLabel("名前").fill(" ");
+    await save.click();
+    await expect(form.getByRole("alert")).toHaveText("保存できなかった（bad_name）");
+    // By now every request has gone out, and none of them carried the 0.
+    expect(written).toEqual(["POST 4", "PUT 9", "PUT 9"]);
+
+    // Neither changed what is stored.
+    const stored = (
+      (await (await request.get("/api/admin/moves")).json()) as { name: string; power: number }[]
+    ).find((one) => one.name === MOVE_NAME);
+    expect(stored?.power).toBe(9);
+
+    // A species can be given it straight away.
+    await page.getByRole("navigation").getByRole("link", { name: "種族" }).click();
+    await page.getByRole("button", { name: "新しい種族" }).click();
+    await expect(
+      speciesForm(page).getByRole("checkbox", { name: new RegExp(MOVE_NAME) }),
+    ).toBeVisible();
+  });
+
   test("offers a skin a player drew as a monster's look", async ({ page, request }) => {
     const blank = { durationMs: 120, cells: [[0, 256]] };
     const drawn = await request.post("/api/skins", {
@@ -195,6 +251,12 @@ test.describe("the admin app", () => {
     await page.getByRole("navigation").getByRole("link", { name: "マップ" }).click();
     const form = mapForm(page);
 
+    // Chosen by name. Which map the screen opens on depends on what else is in
+    // the list, and other tests add to it.
+    await page
+      .getByRole("list", { name: "マップの一覧" })
+      .getByRole("button", { name: /はじまりの草原/ })
+      .click();
     // The starter map loads as it is stored: 16×12, spawn at (1,1).
     await expect(form.getByLabel("名前")).toHaveValue("はじまりの草原");
     await expect.poll(() => tiles(page)).toHaveLength(16 * 12);

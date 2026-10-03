@@ -12,25 +12,19 @@
  */
 
 import { expect, test } from "@playwright/test";
-import type { APIRequestContext, Locator, Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
-import { failOnPageErrors } from "./helpers.js";
-
-const SLOTS = ["body", "shirt", "pants", "shoes", "hair"] as const;
-type Slot = (typeof SLOTS)[number];
-
-interface PaletteEntry {
-  id: string;
-  hex: string;
-}
-
-interface Appearance {
-  skinId: string;
-  parts: Partial<Record<Slot, string>>;
-  colours: PaletteEntry[];
-}
-
-const DEFAULT_LOOK: Appearance = { skinId: "player-default", parts: {}, colours: [] };
+import {
+  DEFAULT_LOOK,
+  SLOTS,
+  drawBars,
+  failOnPageErrors,
+  playerOnTheMap,
+  rows,
+  wear,
+  worn,
+} from "./helpers.js";
+import type { PaletteEntry, Slot } from "./helpers.js";
 
 /** A's colours, by the part each one paints. `spare` is in the palette and on no cell. */
 const PALETTE_A: PaletteEntry[] = [
@@ -53,62 +47,8 @@ const PALETTE_B: PaletteEntry[] = [
 
 const RUN = Date.now().toString(36);
 
-/** Saves a bar skin through the API, the way the editor would, and returns its id. */
-async function drawBars(
-  request: APIRequestContext,
-  name: string,
-  palette: PaletteEntry[],
-  firstRow: number,
-): Promise<string> {
-  const response = await request.post("/api/skins", {
-    data: {
-      formatVersion: 1,
-      name: `${name}-${RUN}`,
-      palette,
-      parts: SLOTS.map((slot, i) => ({
-        slot,
-        frames: [
-          {
-            durationMs: 120,
-            cells: [
-              [0, (firstRow + i) * 16],
-              [i + 1, 16],
-              [0, (15 - firstRow - i) * 16],
-            ].filter(([, length]) => length !== 0),
-          },
-        ],
-      })),
-    },
-  });
-  expect(response.status(), `POST /api/skins (${name})`).toBe(201);
-  return ((await response.json()) as { id: string }).id;
-}
-
-async function wear(request: APIRequestContext, appearance: Appearance): Promise<void> {
-  const response = await request.put("/api/appearance", { data: appearance });
-  expect(response.ok(), "PUT /api/appearance").toBe(true);
-}
-
-async function worn(request: APIRequestContext): Promise<Appearance> {
-  const response = await request.get("/api/appearance");
-  expect(response.ok(), "GET /api/appearance").toBe(true);
-  return (await response.json()) as Appearance;
-}
-
 function wardrobe(page: Page): Locator {
   return page.getByRole("region", { name: "きがえ" });
-}
-
-/** Which row each part's bar is on, in draw order: what a sprite on the page is showing. */
-async function rows(sprite: Locator): Promise<Record<string, number>> {
-  return sprite.locator("g[data-part]").evaluateAll((groups) => {
-    const found: Record<string, number> = {};
-    for (const group of groups) {
-      const rect = group.querySelector("rect");
-      found[(group as SVGGElement).dataset.part ?? ""] = Number(rect?.getAttribute("y"));
-    }
-    return found;
-  });
 }
 
 /** The colour a part's bar is actually painted in, after CSS has had its say. */
@@ -124,8 +64,8 @@ test.describe("what the player wears", () => {
   let b = "";
 
   test.beforeAll(async ({ request }) => {
-    a = await drawBars(request, "しましまA", PALETTE_A, 0);
-    b = await drawBars(request, "しましまB", PALETTE_B, 8);
+    a = await drawBars(request, `しましまA-${RUN}`, PALETTE_A, 0);
+    b = await drawBars(request, `しましまB-${RUN}`, PALETTE_B, 8);
   });
 
   test.beforeEach(async ({ page, request }) => {
@@ -146,16 +86,9 @@ test.describe("what the player wears", () => {
     await expect(wardrobe(page).getByRole("status")).toHaveText("保存した");
   }
 
-  /** The player on the map, once the look has replaced the plain marker. */
-  async function onTheMap(page: Page): Promise<Locator> {
-    const player = page.getByRole("region", { name: "マップ" }).locator("[data-player]");
-    await expect(player.locator("svg rect").first()).toBeAttached();
-    return player;
-  }
-
   test("starts as the default skin, drawn on the map where the marker was", async ({ page }) => {
     await page.goto("/");
-    const player = await onTheMap(page);
+    const player = await playerOnTheMap(page);
 
     // All five parts of the skin that ships with the game, each with something on it.
     await expect(player.locator("g[data-part]")).toHaveCount(SLOTS.length);
@@ -174,14 +107,14 @@ test.describe("what the player wears", () => {
     });
 
     await page.goto("/");
-    await onTheMap(page);
+    await playerOnTheMap(page);
     const map = page.getByRole("region", { name: "マップ" });
     for (const key of ["ArrowRight", "ArrowDown", "ArrowUp", "ArrowLeft"]) {
       await page.keyboard.press(key);
     }
     await expect(map.getByRole("status")).toHaveText("保存済み");
     // The marker is a new element on every tile; what it draws must not be.
-    await onTheMap(page);
+    await playerOnTheMap(page);
     expect(asked).toEqual(["/api/appearance", "/api/skins/player-default"]);
   });
 
@@ -208,9 +141,9 @@ test.describe("what the player wears", () => {
     expect(await worn(request)).toEqual({ skinId: a, parts: {}, colours: [] });
 
     await wardrobe(page).getByRole("link", { name: "マップ" }).click();
-    expect(await rows(await onTheMap(page))).toEqual(ROWS_A);
+    expect(await rows(await playerOnTheMap(page))).toEqual(ROWS_A);
     await page.reload();
-    expect(await rows(await onTheMap(page))).toEqual(ROWS_A);
+    expect(await rows(await playerOnTheMap(page))).toEqual(ROWS_A);
 
     // And the dressing screen opens on what is worn now.
     await openWardrobe(page);
@@ -266,9 +199,9 @@ test.describe("what the player wears", () => {
     );
 
     await page.goto("/");
-    await expect(fill(await onTheMap(page), "hair")).toHaveCSS("fill", "rgb(204, 51, 68)");
+    await expect(fill(await playerOnTheMap(page), "hair")).toHaveCSS("fill", "rgb(204, 51, 68)");
     await page.reload();
-    await expect(fill(await onTheMap(page), "hair")).toHaveCSS("fill", "rgb(204, 51, 68)");
+    await expect(fill(await playerOnTheMap(page), "hair")).toHaveCSS("fill", "rgb(204, 51, 68)");
 
     // Back on the dressing screen the colour is the chosen one, until it is given up.
     const again = await openWardrobe(page);
@@ -307,7 +240,7 @@ test.describe("what the player wears", () => {
     });
 
     await page.goto("/");
-    const player = await onTheMap(page);
+    const player = await playerOnTheMap(page);
     expect(await rows(player)).toEqual({ ...ROWS_A, hair: ROWS_B.hair });
     await expect(fill(player, "hair")).toHaveCSS("fill", "rgb(16, 16, 16)");
 
