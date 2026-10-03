@@ -63,7 +63,7 @@
 
 ---
 
-## Step 4 — バトル
+## Step 4 — バトル（完了）
 
 1. `@mba/core` の `calcDamage()`（乱数は引数で受け取る。中で `Math.random()` を呼ばない）
 2. `species` / `moves` / `owned_monsters` テーブル
@@ -72,6 +72,10 @@
 
 **勝敗の判定をクライアントに置かない。** 学習用でも、ここを最初からサーバに置いておくと
 「信用できる境界はどこか」という感覚が身につく。
+
+実装時の判断は [docs/01-architecture.md](01-architecture.md) §データの流れ（バトルを例に）、
+[docs/03-data-model.md](03-data-model.md) §モンスターとバトル、[docs/04-api-design.md](04-api-design.md) §実装 に追記した。
+テーブルは上の 3 つに加えて `species_moves`・`map_encounters`・`battles` を足している。
 
 ---
 

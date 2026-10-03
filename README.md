@@ -102,19 +102,20 @@ docker run -p 3000:3000 -v mba-data:/app/data monster-battle-app
 
 ## 現在の状態
 
-**Step 3（マップを表示して歩く）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
+**Step 4（バトル）まで。** どこまで進んだかは [docs/05-roadmap.md](docs/05-roadmap.md) の各 Step の見出しに書いてある。
 
-縦の串が 2 本通っている。
+縦の串が 3 本通っている。
 
 ```
 エディタ（最小） → POST /api/skins → SQLite → GET /api/skins/:id → <Sprite> で表示
 マップ画面 → step() で移動 → PUT /api/save → SQLite → GET /api/save → 同じ位置から再開
+草むらで調べる → POST /api/battles → 技を選ぶ → POST /api/battles/:id/turn → 勝敗はサーバが決める
 ```
 
-- `@mba/core` … `step()`（移動）と、タイルの上に立てるかの判定。単体テストあり。バトルの計算は未実装
+- `@mba/core` … 移動（`step()`）とバトル（`calcDamage()`・`playTurn()`）。乱数はすべて引数で受け取る。単体テストあり
 - `@mba/sprite` … `parseSkin()`（検証）と `toRenderable()`（矩形結合）。単体テストあり
-- `@mba/sprite-react` … `<Sprite>`。手書きのサンプルスキンを描けることをテストで確認済み
-- `@mba/db` … `users`・`skins`・`maps`・`saves`
-- `@mba/api` … スキンの保存と取得、マップの取得、セーブの取得と保存。インメモリの SQLite でハンドラをテストしている
-- `@mba/web` … マップ画面（矢印キーか WASD で歩く。位置は自動で保存される）と、最小のスキンエディタ
-- まだ無いもの … バトル、管理画面の中身。マップは起動時に種まきした 1 枚だけ
+- `@mba/sprite-react` … `<Sprite>`。プレイヤーのスキンもモンスターも同じコンポーネントで描く
+- `@mba/db` … `users`・`skins`・`maps`・`saves`・`species`・`moves`・`species_moves`・`map_encounters`・`owned_monsters`・`battles`
+- `@mba/api` … スキン、マップ、セーブ、バトル。インメモリの SQLite と決め打ちの乱数でハンドラをテストしている
+- `@mba/web` … マップ画面（矢印キーか WASD で歩く）、バトル画面、最小のスキンエディタ
+- まだ無いもの … 管理画面の中身、成長（レベルや HP の持ち越し）、見た目のレシピ。マスターデータは起動時に種まきした一式だけ

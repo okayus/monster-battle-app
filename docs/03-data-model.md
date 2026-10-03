@@ -13,7 +13,7 @@
 
 ## テーブル方針
 
-`packages/db/src/schema.ts` に定義済みなのは `users`・`skins`・`maps`・`saves`。残りはスライスを実装するたびに足す。
+`packages/db/src/schema.ts` に未定義なのは `appearances` だけ。スライスを実装するときに足す。
 
 ### マスターデータ（管理画面が編集する）
 
@@ -22,7 +22,7 @@
 | `species` | id, name, max_hp, attack, defense, skin_id | モンスターの種族。絵は `skin_id` の参照だけ |
 | `moves` | id, name, power | 技 |
 | `species_moves` | species_id, move_id | 種族が覚える技 |
-| `maps` | id, name, width, height, tiles, spawn_x, spawn_y, encounter_rate | `tiles` はタイル ID の配列（JSON を TEXT で）。`encounter_rate` は Step 4 で足す |
+| `maps` | id, name, width, height, tiles, spawn_x, spawn_y | `tiles` はタイル ID の配列（JSON を TEXT で） |
 | `map_encounters` | map_id, species_id, weight | どのマップに何が出るか |
 
 ### ユーザーデータ
@@ -31,7 +31,8 @@
 |---|---|---|
 | `users` | id, display_name, created_at | ローカル学習用。認証は docs/04 参照 |
 | `saves` | user_id, map_id, x, y, updated_at | セーブデータ。1 ユーザー 1 行（`user_id` が主キー）なので、保存は上書きになる |
-| `owned_monsters` | id, user_id, species_id, nickname, level, exp, hp | 所持モンスター |
+| `owned_monsters` | id, user_id, species_id, nickname, created_at | 所持モンスター。`level` / `exp` / `hp` は成長を作るときに足す |
+| `battles` | id, user_id, status, state, created_at, updated_at | バトル。`state` が状態のすべて（JSON） |
 | `appearances` | user_id, skin_id, variant_overrides, color_overrides | **見た目のレシピ**。数十バイト |
 
 ### スキン
@@ -70,6 +71,35 @@
 **最初のマップは API の起動時に種まきする**（`apps/api/src/maps.ts` の `ensureStarterMap()`）。
 管理画面（Step 5）ができるまでマップを作る手段が無いため。行が無いときだけ入れ、あれば触らない。
 管理画面で編集した後は DB の行が正本で、コード内の絵は出発点でしかない。
+
+### モンスターとバトル
+
+**バトルの状態はサーバにだけある。** `battles.state` に、両者の HP・能力値・技・ターン数を JSON で持つ。
+ブラウザに渡すのはその一部（名前・HP・自分の技）だけで、状態を送り返させることはしない。
+`status` は `state` の中の 1 項目を列に写したもの。「進行中のバトル」を SQL で聞けるようにするための重複。
+
+**バトルは始まった時点の能力値を写して持つ。** `state` の中身は種族への参照ではなく値のコピーなので、
+バトルの途中でマスターデータが編集されても、そのバトルは始まったときの数字で最後まで進む。
+
+**バトルは毎回、両者とも全快で始まり、結果を持ち越さない。** だから `owned_monsters` には
+`level` / `exp` / `hp` をまだ足していない。使わない列を先に作ると、意味が決まらないまま値だけ入る。
+
+**`map_encounters.weight` は確率ではなく重み。** 合計が 100 である必要が無いので、マップに種族を 1 つ足すとき
+ほかの行を直さなくてよい。抽選は `@mba/core` の `pickWeighted()` で、乱数は引数で受け取る。
+
+**`maps` に `encounter_rate` は足していない。** バトルは「草むらで調べる」という操作で始まる形にしたので、
+「歩くたびに何 % で出るか」を持つ場所が要らなくなった。歩数で抽選するなら 1 歩ごとにサーバへ知らせる必要があり、
+docs/04 に書いた位置の検査の線引きも引き直しになる。そこまでやる理由ができたら足す。
+
+**草むらかどうかは保存しない。** 歩けるかどうかと同じで、タイルの種類から `@mba/core` の `hasWildMonsters()` が導く。
+
+**モンスターの絵は、プレイヤーが描くスキンと同じテーブルに、所有者なしで入る。** 種まきの絵も
+`parseSkin()` を通してから保存するので、運営のスキンだけ検証を抜ける経路は無い。
+
+**最初の一式は、種族が 1 件も無いときにだけ種まきする**（`apps/api/src/seed.ts`）。1 行ずつ「無ければ入れる」に
+しないのは、関連テーブルのため。管理画面で種族から技を外しても、行単位の種まきは次の起動で元に戻してしまう。
+
+**終わったバトルも、途中で離れたバトルも、行は残る。** 消す処理は書いていない（下の「削除しない」）。
 
 ## マイグレーション
 
