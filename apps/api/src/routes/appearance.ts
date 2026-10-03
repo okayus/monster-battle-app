@@ -15,7 +15,7 @@
 import { Hono } from "hono";
 
 import type { Db } from "@mba/db";
-import { PART_SLOTS, coloursOf, composeAppearance, parseAppearance } from "@mba/sprite";
+import { coloursOf, composeAppearance, parseAppearance, skinsNamedBy } from "@mba/sprite";
 
 import { loadAppearance, saveAppearance } from "../appearance.js";
 import { getUserId } from "../auth.js";
@@ -46,12 +46,9 @@ export function appearanceRoutes(db: Db) {
     // From here on only `appearance` is used — never `body.value`.
     const appearance = parsed.value;
 
-    // What only the database can say: do the skins it names exist?
-    const named = [appearance.skinId];
-    for (const slot of PART_SLOTS) {
-      const from = appearance.parts[slot];
-      if (from !== undefined) named.push(from);
-    }
+    // What only the database can say: can the skins it names be worn? One
+    // that has been retired is refused exactly like one that never existed.
+    const named = skinsNamedBy(appearance);
     const skins = renderablesOf(db, named);
     for (const skinId of named) {
       if (!skins.has(skinId)) return c.json({ error: { kind: "unknown_skin", skinId } }, 400);

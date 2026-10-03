@@ -5,10 +5,23 @@
 
 import { asc, eq } from "drizzle-orm";
 
-import type { Move, OwnedMonster, Species, SpeciesInput, Weighted } from "@mba/core";
+import type {
+  AdminMove,
+  AdminSpecies,
+  MoveInput,
+  OwnedMonster,
+  Species,
+  SpeciesInput,
+  Weighted,
+} from "@mba/core";
 import { mapEncounters, moves, ownedMonsters, species, speciesMoves } from "@mba/db";
 import type { Db } from "@mba/db";
 
+/**
+ * A species, for a battle. Retired or not: retiring a species stops it from
+ * being offered, it does not take away the monster a player already has. That
+ * monster looks its species up here, and goes on fighting.
+ */
 export function findSpecies(db: Db, id: string): Species | undefined {
   const row = db.select().from(species).where(eq(species.id, id)).get();
   if (row === undefined) return undefined;
@@ -71,35 +84,65 @@ export function leadMonsterOf(db: Db, userId: string): OwnedMonster | undefined 
 // What the admin API reads and writes
 // ---------------------------------------------------------------------------
 
-export function listSpecies(db: Db): Species[] {
+/** A species with the mark an admin needs to see: whether it has been retired. */
+export function findAdminSpecies(db: Db, id: string): AdminSpecies | undefined {
+  const found = findSpecies(db, id);
+  if (found === undefined) return undefined;
+  const row = db
+    .select({ retiredAt: species.retiredAt })
+    .from(species)
+    .where(eq(species.id, id))
+    .get();
+  return { ...found, retired: row?.retiredAt != null };
+}
+
+/** Every species, retired or not. */
+export function listSpecies(db: Db): AdminSpecies[] {
   const ids = db
     .select({ id: species.id })
     .from(species)
     .orderBy(asc(species.name), asc(species.id))
     .all();
 
-  const all: Species[] = [];
+  const all: AdminSpecies[] = [];
   for (const { id } of ids) {
-    const found = findSpecies(db, id);
+    const found = findAdminSpecies(db, id);
     if (found !== undefined) all.push(found);
   }
   return all;
 }
 
-export function listMoves(db: Db): Move[] {
+/** Every move, retired or not. */
+export function listMoves(db: Db): AdminMove[] {
   return db
-    .select({ id: moves.id, name: moves.name, power: moves.power })
+    .select({ id: moves.id, name: moves.name, power: moves.power, retiredAt: moves.retiredAt })
     .from(moves)
-    .orderBy(asc(moves.id))
-    .all();
+    .orderBy(asc(moves.name), asc(moves.id))
+    .all()
+    .map((row) => ({
+      id: row.id,
+      name: row.name,
+      power: row.power,
+      retired: row.retiredAt !== null,
+    }));
 }
 
-export function moveExists(db: Db, id: string): boolean {
-  return db.select({ id: moves.id }).from(moves).where(eq(moves.id, id)).get() !== undefined;
+export function findMove(db: Db, id: string): AdminMove | undefined {
+  const row = db.select().from(moves).where(eq(moves.id, id)).get();
+  if (row === undefined) return undefined;
+  return { id: row.id, name: row.name, power: row.power, retired: row.retiredAt !== null };
 }
 
-export function speciesExists(db: Db, id: string): boolean {
-  return db.select({ id: species.id }).from(species).where(eq(species.id, id)).get() !== undefined;
+/**
+ * Creates or replaces a move. Whether it is retired is not part of what is
+ * saved here: editing a move leaves that as it was.
+ */
+export function saveMove(db: Db, id: string, input: MoveInput): void {
+  const row = { name: input.name, power: input.power };
+  db.insert(moves)
+    .values({ id, ...row })
+    .onConflictDoUpdate({ target: moves.id, set: row })
+    .run();
 }
 
 /**

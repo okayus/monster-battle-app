@@ -551,9 +551,10 @@ export interface MapInput {
   encounters: Encounter[];
 }
 
-/** A map as the admin screen edits it: the grid, and who turns up on it. */
+/** A map as the admin screen edits it: the grid, who turns up on it, and whether it is in use. */
 export interface AdminMap extends GameMap {
   encounters: Encounter[];
+  retired: boolean;
 }
 
 export type MapError =
@@ -601,6 +602,7 @@ export interface SkinSummary {
   name: string;
   /** Null for the skins that ship with the game. */
   ownerId: string | null;
+  retired: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -41,6 +41,7 @@ const POND: AdminMap = {
     { speciesId: "drop", weight: 3 },
     { speciesId: "moss", weight: 5 },
   ],
+  retired: false,
 };
 
 describe("the species form", () => {
@@ -85,8 +86,11 @@ describe("the species form", () => {
 
 describe("the map form", () => {
   it("sends back exactly what it was loaded with, if nothing is edited", () => {
-    const { id: _id, ...input } = POND;
+    // The id is in the path, and whether the map is retired is not the form's
+    // to say: editing and retiring are separate requests.
+    const { id: _id, retired: _retired, ...input } = POND;
     expect(toMapInput(mapFormOf(POND))).toEqual(input);
+    expect(toMapInput(mapFormOf({ ...POND, retired: true }))).toEqual(input);
   });
 
   it("starts a new map as something the rules accept once it has a name", () => {

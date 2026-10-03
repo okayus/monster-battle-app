@@ -6,27 +6,23 @@
  * docs/05-roadmap.md); until that exists, the only map is the one seeded here.
  */
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 
 import { err, ok } from "@mba/core";
 import type { AdminMap, Encounter, GameMap, MapInput, Position, Result, TileKind } from "@mba/core";
 import { mapEncounters, maps } from "@mba/db";
-import type { Db } from "@mba/db";
+import type { Db, MapRow } from "@mba/db";
 
 /** The map a player with no save starts on. */
 export const START_MAP_ID = "start";
 
 /**
- * Reads a map and turns the row into the shape the game logic uses.
- *
- * Every reader of a map goes through here, so the row-to-domain conversion
- * exists once. The cast on `tiles` is the same one-way trust as wherever else
- * a row is read: what is in the database was checked by the code that put it
- * there.
+ * Turns a row into the shape the game logic uses. The row-to-domain conversion
+ * exists once, here. The cast on `tiles` is the same one-way trust as wherever
+ * else a row is read: what is in the database was checked by the code that put
+ * it there.
  */
-export function findMap(db: Db, id: string): GameMap | undefined {
-  const row = db.select().from(maps).where(eq(maps.id, id)).get();
-  if (row === undefined) return undefined;
+function toGameMap(row: MapRow): GameMap {
   return {
     id: row.id,
     name: row.name,
@@ -35,6 +31,24 @@ export function findMap(db: Db, id: string): GameMap | undefined {
     tiles: JSON.parse(row.tiles) as TileKind[],
     spawn: { x: row.spawnX, y: row.spawnY },
   };
+}
+
+/**
+ * Reads a map, for the game.
+ *
+ * A retired map is not there, as far as the game is concerned. Everything on
+ * the player's side reads maps through this function — fetching one, saving a
+ * position on one, loading a save — so that is decided once, here. A save that
+ * was made on a map since retired then finds no map, and `loadSave` already
+ * knows what to do with that.
+ */
+export function findMap(db: Db, id: string): GameMap | undefined {
+  const row = db
+    .select()
+    .from(maps)
+    .where(and(eq(maps.id, id), isNull(maps.retiredAt)))
+    .get();
+  return row === undefined ? undefined : toGameMap(row);
 }
 
 // ---------------------------------------------------------------------------
@@ -50,10 +64,19 @@ function encounterRowsOf(db: Db, mapId: string): Encounter[] {
     .all();
 }
 
-/** A map with who turns up on it — the shape the admin screen edits. */
+/**
+ * A map with who turns up on it — the shape the admin screen edits. Retired
+ * maps included, with the mark: an admin has to be able to see one to bring it
+ * back.
+ */
 export function findAdminMap(db: Db, id: string): AdminMap | undefined {
-  const map = findMap(db, id);
-  return map === undefined ? undefined : { ...map, encounters: encounterRowsOf(db, id) };
+  const row = db.select().from(maps).where(eq(maps.id, id)).get();
+  if (row === undefined) return undefined;
+  return {
+    ...toGameMap(row),
+    encounters: encounterRowsOf(db, id),
+    retired: row.retiredAt !== null,
+  };
 }
 
 export function listMaps(db: Db): AdminMap[] {

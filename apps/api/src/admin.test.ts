@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import { calcDamage } from "@mba/core";
 import type {
   AdminMap,
+  AdminMove,
+  AdminSpecies,
   BattleView,
   MapInput,
   SaveData,
@@ -13,7 +15,7 @@ import type {
   TileKind,
   TurnOutcome,
 } from "@mba/core";
-import { maps, species, users } from "@mba/db";
+import { maps, moves, skins, species, users } from "@mba/db";
 
 import { LOCAL_USER_ID } from "./auth.js";
 import { START_MAP_ID } from "./maps.js";
@@ -95,7 +97,13 @@ describe("the admin guard", () => {
     ["POST", "/maps", starterInput()],
     ["PUT", `/maps/${START_MAP_ID}`, starterInput({ name: "書きかえた" })],
     ["GET", "/moves", undefined],
+    ["POST", "/moves", { name: "つつく", power: 4 }],
+    ["PUT", "/moves/bump", { name: "ぶつかる", power: 9 }],
     ["GET", "/skins", undefined],
+    ["PUT", "/species/moss/retired", { retired: true }],
+    ["PUT", "/moves/bump/retired", { retired: true }],
+    ["PUT", `/maps/${START_MAP_ID}/retired`, { retired: true }],
+    ["PUT", "/skins/species-moss/retired", { retired: true }],
     // A path nobody defined is guarded as well: the check is on the prefix.
     ["GET", "/anything-added-later", undefined],
   ];
@@ -118,10 +126,16 @@ describe("the admin guard", () => {
     await send(app, "POST", "/species", speciesInput());
     await send(app, "PUT", "/species/moss", speciesInput());
     await send(app, "PUT", `/maps/${START_MAP_ID}`, starterInput({ name: "書きかえた" }));
+    await send(app, "POST", "/moves", { name: "つつく", power: 4 });
+    await send(app, "PUT", "/moves/bump", { name: "ぶつかる", power: 9 });
+    await send(app, "PUT", "/skins/species-moss/retired", { retired: true });
 
     expect(db.select().from(species).all()).toHaveLength(3);
     expect(findSpecies(db, "moss")?.name).toBe("モリダマ");
     expect(db.select().from(maps).get()?.name).toBe(starter().name);
+    expect(db.select().from(moves).all()).toHaveLength(3);
+    expect(db.select().from(moves).where(eq(moves.id, "bump")).get()?.power).toBe(5);
+    expect(db.select().from(skins).where(eq(skins.id, "species-moss")).get()?.retiredAt).toBeNull();
   });
 
   it("refuses before it looks at the body", async () => {
@@ -156,9 +170,12 @@ describe("GET /api/admin/species", () => {
     const res = await send(app, "GET", "/species");
     expect(res.status).toBe(200);
 
-    const listed = (await res.json()) as Species[];
+    const listed = (await res.json()) as AdminSpecies[];
     expect(listed.map((kind) => kind.id).sort()).toEqual(["drop", "moss", "rock"]);
-    for (const kind of listed) expect(kind).toEqual(findSpecies(db, kind.id));
+    // What a battle would use, plus the one thing only an admin is shown.
+    for (const kind of listed) {
+      expect(kind).toEqual({ ...findSpecies(db, kind.id), retired: false });
+    }
   });
 });
 
@@ -168,11 +185,11 @@ describe("POST /api/admin/species", () => {
     const res = await send(app, "POST", "/species", speciesInput());
     expect(res.status).toBe(201);
 
-    const created = (await res.json()) as Species;
+    const created = (await res.json()) as AdminSpecies;
     expect(res.headers.get("Location")).toBe(`/api/admin/species/${created.id}`);
     expect(created).toMatchObject({ name: "テストダマ", maxHp: 30, attack: 11, defense: 7 });
     expect(created.moves.map((move) => move.id)).toEqual(["bump", "fling"]);
-    expect(findSpecies(db, created.id)).toEqual(created);
+    expect(created).toEqual({ ...findSpecies(db, created.id), retired: false });
   });
 
   it("chooses the id itself, whatever the body carries", async () => {
@@ -198,10 +215,10 @@ describe("PUT /api/admin/species/:id", () => {
     );
     expect(res.status).toBe(200);
 
-    const updated = (await res.json()) as Species;
+    const updated = (await res.json()) as AdminSpecies;
     expect(updated).toMatchObject({ id: "moss", name: "コケダマ", maxHp: 30 });
     expect(updated.moves.map((move) => move.id)).toEqual(["fling"]);
-    expect(findSpecies(db, "moss")).toEqual(updated);
+    expect(updated).toEqual({ ...findSpecies(db, "moss"), retired: false });
     expect(db.select().from(species).all()).toHaveLength(3);
   });
 
@@ -305,12 +322,129 @@ describe("PUT /api/admin/species/:id", () => {
   });
 });
 
+describe("POST /api/admin/moves", () => {
+  it("creates a move and answers with it", async () => {
+    const { app, db } = setup();
+    const res = await send(app, "POST", "/moves", { name: "つつく", power: 4 });
+    expect(res.status).toBe(201);
+
+    const created = (await res.json()) as AdminMove;
+    expect(res.headers.get("Location")).toBe(`/api/admin/moves/${created.id}`);
+    expect(created).toEqual({ id: created.id, name: "つつく", power: 4, retired: false });
+    expect(db.select().from(moves).where(eq(moves.id, created.id)).get()).toMatchObject({
+      name: "つつく",
+      power: 4,
+      retiredAt: null,
+    });
+  });
+
+  it("chooses the id itself, whatever the body carries", async () => {
+    const { app, db } = setup();
+    const res = await send(app, "POST", "/moves", { id: "bump", name: "つつく", power: 4 });
+    const created = (await res.json()) as AdminMove;
+
+    expect(created.id).not.toBe("bump");
+    expect(db.select().from(moves).where(eq(moves.id, "bump")).get()?.name).toBe("ぶつかる");
+    expect(db.select().from(moves).all()).toHaveLength(4);
+  });
+
+  it("can be given to a species straight away", async () => {
+    const { app } = setup();
+    const created = (await (
+      await send(app, "POST", "/moves", { name: "つつく", power: 4 })
+    ).json()) as AdminMove;
+
+    const res = await send(app, "PUT", "/species/moss", speciesInput({ moveIds: [created.id] }));
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as AdminSpecies).moves).toEqual([
+      { id: created.id, name: "つつく", power: 4 },
+    ]);
+  });
+
+  describe("rejects with 400, and creates nothing", () => {
+    it.each([
+      ["a body that is not JSON", "{ not json", { kind: "bad_json" }],
+      [
+        "a power that is a string",
+        { name: "つつく", power: "4" },
+        { kind: "malformed", at: "$.power" },
+      ],
+      ["no name at all", { power: 4 }, { kind: "malformed", at: "$.name" }],
+      ["an empty name", { name: " ", power: 4 }, { kind: "bad_name" }],
+      ["no power", { name: "つつく", power: 0 }, { kind: "bad_power", power: 0 }],
+      [
+        "a power between whole numbers",
+        { name: "つつく", power: 1.5 },
+        { kind: "bad_power", power: 1.5 },
+      ],
+    ])("%s", async (_label, body, error) => {
+      const { app, db } = setup();
+      const res = await send(app, "POST", "/moves", body);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error });
+      expect(db.select().from(moves).all()).toHaveLength(3);
+    });
+  });
+
+  it("answers 413 for a body far larger than any move", async () => {
+    const { app } = setup();
+    const res = await send(app, "POST", "/moves", {
+      name: "つつく",
+      power: 4,
+      junk: "x".repeat(4000),
+    });
+    expect(res.status).toBe(413);
+  });
+});
+
+describe("PUT /api/admin/moves/:id", () => {
+  it("replaces the move", async () => {
+    const { app, db } = setup();
+    const res = await send(app, "PUT", "/moves/bump", { name: "たいあたり", power: 9 });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "bump", name: "たいあたり", power: 9, retired: false });
+    expect(db.select().from(moves).all()).toHaveLength(3);
+  });
+
+  it("answers 404 for an id it never handed out, and creates nothing", async () => {
+    const { app, db } = setup();
+    const res = await send(app, "PUT", "/moves/no-such-move", { name: "つつく", power: 4 });
+    expect(res.status).toBe(404);
+    expect(db.select().from(moves).all()).toHaveLength(3);
+  });
+
+  it("refuses a move that breaks the rules, and leaves it as it was", async () => {
+    const { app, db } = setup();
+    const res = await send(app, "PUT", "/moves/bump", { name: "ぶつかる", power: 1000 });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: { kind: "bad_power", power: 1000 } });
+    expect(db.select().from(moves).where(eq(moves.id, "bump")).get()?.power).toBe(5);
+  });
+
+  it("is what the next battle uses, and not one that has already started", async () => {
+    const { app } = setup({ random: rolls(0) });
+    await putSave(app, { mapId: START_MAP_ID, position: firstTile("grass") });
+    const before = await startBattle(app);
+    const powerIn = (battle: BattleView) =>
+      battle.player.moves.find((move) => move.id === "bump")?.power;
+    expect(powerIn(before)).toBe(5);
+
+    await send(app, "PUT", "/moves/bump", { name: "ぶつかる", power: 9 });
+
+    const still = (await (await app.request(`/api/battles/${before.id}`)).json()) as BattleView;
+    expect(powerIn(still)).toBe(5);
+    expect(powerIn(await startBattle(app))).toBe(9);
+  });
+});
+
 describe("GET /api/admin/maps", () => {
   it("lists every map with who turns up on it", async () => {
     const { app } = setup();
     const res = await send(app, "GET", "/maps");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual([{ ...starter(), encounters: starterInput().encounters }]);
+    expect(await res.json()).toEqual([
+      { ...starter(), encounters: starterInput().encounters, retired: false },
+    ]);
   });
 });
 
@@ -331,11 +465,12 @@ describe("POST /api/admin/maps", () => {
 
     const created = (await res.json()) as AdminMap;
     expect(res.headers.get("Location")).toBe(`/api/admin/maps/${created.id}`);
-    expect(created).toEqual({ ...small, id: created.id });
+    expect(created).toEqual({ ...small, id: created.id, retired: false });
 
     const served = await app.request(`/api/maps/${created.id}`);
     expect(served.status).toBe(200);
-    const { encounters: _encounters, ...grid } = created;
+    // The game is handed the grid: not who turns up, and not the admin's mark.
+    const { encounters: _encounters, retired: _retired, ...grid } = created;
     expect(await served.json()).toEqual(grid);
   });
 
@@ -478,13 +613,13 @@ describe("PUT /api/admin/maps/:id", () => {
 });
 
 describe("what the forms choose from", () => {
-  it("lists the moves", async () => {
+  it("lists the moves, by name", async () => {
     const { app } = setup();
     const res = await send(app, "GET", "/moves");
     expect(await res.json()).toEqual([
-      { id: "bite", name: "かじる", power: 6 },
-      { id: "bump", name: "ぶつかる", power: 5 },
-      { id: "fling", name: "はねとばす", power: 7 },
+      { id: "bite", name: "かじる", power: 6, retired: false },
+      { id: "fling", name: "はねとばす", power: 7, retired: false },
+      { id: "bump", name: "ぶつかる", power: 5, retired: false },
     ]);
   });
 
@@ -500,8 +635,9 @@ describe("what the forms choose from", () => {
       "species-rock",
     ]);
     for (const skin of listed) {
-      expect(Object.keys(skin).sort()).toEqual(["id", "name", "ownerId"]);
+      expect(Object.keys(skin).sort()).toEqual(["id", "name", "ownerId", "retired"]);
       expect(skin.ownerId).toBeNull();
+      expect(skin.retired).toBe(false);
     }
   });
 });

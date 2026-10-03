@@ -32,11 +32,12 @@ export function skinRoutes(db: Db) {
     // Names only. A drawing is asked for by id, by whoever wants to show it.
     // And whose a skin is leaves the server as "yours" or "not yours": the
     // list is the same for everyone, but nobody is handed another user's id.
-    const wearable: WearableSkin[] = listSkins(db).map((skin) => ({
-      id: skin.id,
-      name: skin.name,
-      mine: skin.ownerId === userId,
-    }));
+    //
+    // A retired skin is not on this list — not even for whoever drew it. That
+    // is what retiring means on this side of the API: no longer offered.
+    const wearable: WearableSkin[] = listSkins(db)
+      .filter((skin) => !skin.retired)
+      .map((skin) => ({ id: skin.id, name: skin.name, mine: skin.ownerId === userId }));
     return c.json(wearable);
   });
 
