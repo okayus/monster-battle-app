@@ -11,16 +11,18 @@ import { useEffect, useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import { MAP_LIMITS, TILE_KINDS, err, ok } from "@mba/core";
-import type { AdminMap, Result, Species, TileKind } from "@mba/core";
+import type { AdminMap, AdminSpecies, Result, TileKind } from "@mba/core";
 
 import { createMap, describeError, fetchMaps, fetchSpecies, updateMap } from "./api.js";
 import type { ApiError } from "./api.js";
 import { blankMapForm, mapFormOf, moveSpawn, paintTile, setWeight, toMapInput } from "./forms.js";
 import type { MapForm } from "./forms.js";
+import { offered, withMark } from "./retire.js";
+import { RetireControl } from "./RetireControl.js";
 
 interface Loaded {
   maps: AdminMap[];
-  species: Species[];
+  species: AdminSpecies[];
 }
 
 type LoadState =
@@ -153,6 +155,19 @@ function MapEditor({ initial }: { initial: Loaded }) {
   const [brush, setBrush] = useState<Brush>("grass");
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
 
+  /** The map in the form as the server last listed it, if it has been saved at all. */
+  const listed = maps.find((map) => map.id === form.id);
+
+  const refresh = async () => {
+    const fresh = await fetchMaps();
+    if (fresh.ok) setMaps(fresh.value);
+  };
+
+  /** The species that turn up on the map in the form: the ones with a weight. */
+  const turningUp = Object.entries(form.weights)
+    .filter(([, weight]) => weight > 0)
+    .map(([speciesId]) => speciesId);
+
   const change = (next: (current: MapForm) => MapForm) => {
     setForm(next);
     setSave({ kind: "idle" });
@@ -192,8 +207,7 @@ function MapEditor({ initial }: { initial: Loaded }) {
     // Show what the server stored, and ask for the list again: both are the
     // server's, not this form's.
     setForm(mapFormOf(result.value));
-    const fresh = await fetchMaps();
-    if (fresh.ok) setMaps(fresh.value);
+    await refresh();
     setSave({ kind: "saved" });
   };
 
@@ -209,11 +223,11 @@ function MapEditor({ initial }: { initial: Loaded }) {
               <li key={map.id}>
                 <button
                   type="button"
-                  style={item}
+                  style={{ ...item, opacity: map.retired ? 0.55 : 1 }}
                   aria-pressed={form.id === map.id}
                   onClick={() => choose(mapFormOf(map))}
                 >
-                  <strong>{map.name}</strong>
+                  <strong>{withMark(map.name, map.retired)}</strong>
                   <br />
                   {map.width} × {map.height}
                 </button>
@@ -303,7 +317,8 @@ function MapEditor({ initial }: { initial: Loaded }) {
 
           <fieldset>
             <legend>草むらに出るモンスター（重み。0 は出ない）</legend>
-            {species.map((kind) => (
+            {/* What is in use — and whoever turns up already, even if retired since. */}
+            {offered(species, turningUp).map((kind) => (
               <label key={kind.id} style={{ display: "block" }}>
                 <input
                   type="number"
@@ -315,7 +330,7 @@ function MapEditor({ initial }: { initial: Loaded }) {
                     change((current) => setWeight(current, kind.id, event.target.valueAsNumber))
                   }
                 />{" "}
-                {kind.name}
+                {withMark(kind.name, kind.retired)}
               </label>
             ))}
           </fieldset>
@@ -328,6 +343,16 @@ function MapEditor({ initial }: { initial: Loaded }) {
           </p>
           {save.kind === "failed" && (
             <p role="alert">保存できなかった（{describeError(save.error)}）</p>
+          )}
+
+          {listed !== undefined && (
+            <RetireControl
+              key={`${listed.id}:${listed.retired}`}
+              kind="maps"
+              id={listed.id}
+              retired={listed.retired}
+              onChanged={refresh}
+            />
           )}
         </form>
       </div>

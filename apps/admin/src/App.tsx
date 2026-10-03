@@ -1,5 +1,6 @@
 /**
- * Admin SPA shell — authoring surface for master data (monsters, maps).
+ * Admin SPA shell — authoring surface for master data (monsters, moves, maps),
+ * and the place where things are retired.
  *
  * Deliberately a separate app rather than a route inside the player SPA: it
  * talks to a different API prefix (/api/admin), has different authorization,
@@ -10,8 +11,10 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import { MapsScreen } from "./MapsScreen.js";
+import { MovesScreen } from "./MovesScreen.js";
 import { hrefs, parseRoute } from "./route.js";
 import type { Route } from "./route.js";
+import { SkinsScreen } from "./SkinsScreen.js";
 import { SpeciesScreen } from "./SpeciesScreen.js";
 
 function subscribeToHash(onChange: () => void): () => void {
@@ -51,8 +54,14 @@ export function App() {
         <a href={hrefs.species} aria-current={route.screen === "species" ? "page" : undefined}>
           種族
         </a>
+        <a href={hrefs.moves} aria-current={route.screen === "moves" ? "page" : undefined}>
+          技
+        </a>
         <a href={hrefs.maps} aria-current={route.screen === "maps" ? "page" : undefined}>
           マップ
+        </a>
+        <a href={hrefs.skins} aria-current={route.screen === "skins" ? "page" : undefined}>
+          スキン
         </a>
       </nav>
       <p>
@@ -60,7 +69,9 @@ export function App() {
       </p>
 
       {route.screen === "species" && <SpeciesScreen />}
+      {route.screen === "moves" && <MovesScreen />}
       {route.screen === "maps" && <MapsScreen />}
+      {route.screen === "skins" && <SkinsScreen />}
     </main>
   );
 }

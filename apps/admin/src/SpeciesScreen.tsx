@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { SPECIES_LIMITS, err, ok } from "@mba/core";
-import type { Move, Result, SkinSummary, Species } from "@mba/core";
+import type { AdminMove, AdminSpecies, Result, SkinSummary } from "@mba/core";
 
 import {
   createSpecies,
@@ -23,11 +23,13 @@ import {
 import type { ApiError } from "./api.js";
 import { blankSpeciesForm, speciesFormOf, toSpeciesInput, toggleMove } from "./forms.js";
 import type { SpeciesForm } from "./forms.js";
+import { offered, withMark } from "./retire.js";
+import { RetireControl } from "./RetireControl.js";
 import { SkinPreview } from "./SkinPreview.js";
 
 interface Loaded {
-  species: Species[];
-  moves: Move[];
+  species: AdminSpecies[];
+  moves: AdminMove[];
   skins: SkinSummary[];
 }
 
@@ -90,16 +92,19 @@ const list: CSSProperties = {
   display: "grid",
   gap: "0.5rem",
 };
-const item: CSSProperties = {
-  display: "flex",
-  gap: "0.75rem",
-  alignItems: "center",
-  width: "100%",
-  textAlign: "left",
-  font: "inherit",
-  padding: "0.5rem",
-  cursor: "pointer",
-};
+function item(retired: boolean): CSSProperties {
+  return {
+    display: "flex",
+    gap: "0.75rem",
+    alignItems: "center",
+    width: "100%",
+    textAlign: "left",
+    font: "inherit",
+    padding: "0.5rem",
+    cursor: "pointer",
+    opacity: retired ? 0.55 : 1,
+  };
+}
 const fields: CSSProperties = { display: "grid", gap: "0.75rem", justifyItems: "start" };
 const fieldRow: CSSProperties = { display: "flex", gap: "1rem", flexWrap: "wrap" };
 
@@ -107,12 +112,21 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
   const [species, setSpecies] = useState(initial.species);
   const { moves, skins } = initial;
 
-  const firstSkin = skins[0]?.id ?? "";
+  // A new species starts with a skin that can actually be chosen.
+  const firstSkin = skins.find((skin) => !skin.retired)?.id ?? "";
   const first = species[0];
   const [form, setForm] = useState<SpeciesForm>(() =>
     first === undefined ? blankSpeciesForm(firstSkin) : speciesFormOf(first),
   );
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
+
+  /** The species in the form as the server last listed it, if it has been saved at all. */
+  const current = species.find((kind) => kind.id === form.id);
+
+  const refresh = async () => {
+    const fresh = await fetchSpecies();
+    if (fresh.ok) setSpecies(fresh.value);
+  };
 
   const edit = (patch: Partial<SpeciesForm>) => {
     setForm((current) => ({ ...current, ...patch }));
@@ -136,8 +150,7 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
     // Show what the server stored, not what was typed. The list is asked for
     // again for the same reason: it is the server's, in the server's order.
     setForm(speciesFormOf(result.value));
-    const fresh = await fetchSpecies();
-    if (fresh.ok) setSpecies(fresh.value);
+    await refresh();
     setSave({ kind: "saved" });
   };
 
@@ -165,13 +178,13 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
               <li key={kind.id}>
                 <button
                   type="button"
-                  style={item}
+                  style={item(kind.retired)}
                   aria-pressed={form.id === kind.id}
                   onClick={() => choose(speciesFormOf(kind))}
                 >
                   <SkinPreview key={kind.skinId} skinId={kind.skinId} size="3rem" />
                   <span>
-                    <strong>{kind.name}</strong>
+                    <strong>{withMark(kind.name, kind.retired)}</strong>
                     <br />
                     HP {kind.maxHp} / 攻 {kind.attack} / 防 {kind.defense}
                     <br />
@@ -216,9 +229,11 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
           <label>
             見た目{" "}
             <select value={form.skinId} onChange={(event) => edit({ skinId: event.target.value })}>
-              {skins.map((skin) => (
+              {/* What is in use — and the one chosen already, even if it has been retired. */}
+              {offered(skins, [form.skinId]).map((skin) => (
                 <option key={skin.id} value={skin.id}>
-                  {skin.name}（{skin.ownerId === null ? "運営" : "プレイヤー作"}）
+                  {withMark(skin.name, skin.retired)}（
+                  {skin.ownerId === null ? "運営" : "プレイヤー作"}）
                 </option>
               ))}
             </select>
@@ -227,14 +242,14 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
 
           <fieldset>
             <legend>技（1〜{SPECIES_LIMITS.maxMoves} 個）</legend>
-            {moves.map((move) => (
+            {offered(moves, form.moveIds).map((move) => (
               <label key={move.id} style={{ display: "block" }}>
                 <input
                   type="checkbox"
                   checked={form.moveIds.includes(move.id)}
                   onChange={() => choose(toggleMove(form, move.id))}
                 />{" "}
-                {move.name}（威力 {move.power}）
+                {withMark(move.name, move.retired)}（威力 {move.power}）
               </label>
             ))}
           </fieldset>
@@ -247,6 +262,16 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
           </p>
           {save.kind === "failed" && (
             <p role="alert">保存できなかった（{describeError(save.error)}）</p>
+          )}
+
+          {current !== undefined && (
+            <RetireControl
+              key={`${current.id}:${current.retired}`}
+              kind="species"
+              id={current.id}
+              retired={current.retired}
+              onChanged={refresh}
+            />
           )}
         </form>
       </div>

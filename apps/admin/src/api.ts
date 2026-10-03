@@ -11,11 +11,12 @@
 import { err, ok } from "@mba/core";
 import type {
   AdminMap,
+  AdminMove,
+  AdminSpecies,
   MapInput,
-  Move,
+  MoveInput,
   Result,
   SkinSummary,
-  Species,
   SpeciesInput,
 } from "@mba/core";
 import type { RenderableSkin } from "@mba/sprite";
@@ -71,15 +72,18 @@ function withJson(method: "POST" | "PUT", body: unknown): RequestInit {
   return { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
 }
 
-export function fetchSpecies(): Promise<Result<Species[], ApiError>> {
+export function fetchSpecies(): Promise<Result<AdminSpecies[], ApiError>> {
   return request("/api/admin/species");
 }
 
-export function createSpecies(input: SpeciesInput): Promise<Result<Species, ApiError>> {
+export function createSpecies(input: SpeciesInput): Promise<Result<AdminSpecies, ApiError>> {
   return request("/api/admin/species", withJson("POST", input));
 }
 
-export function updateSpecies(id: string, input: SpeciesInput): Promise<Result<Species, ApiError>> {
+export function updateSpecies(
+  id: string,
+  input: SpeciesInput,
+): Promise<Result<AdminSpecies, ApiError>> {
   return request(`/api/admin/species/${encodeURIComponent(id)}`, withJson("PUT", input));
 }
 
@@ -95,8 +99,34 @@ export function updateMap(id: string, input: MapInput): Promise<Result<AdminMap,
   return request(`/api/admin/maps/${encodeURIComponent(id)}`, withJson("PUT", input));
 }
 
-export function fetchMoves(): Promise<Result<Move[], ApiError>> {
+export function fetchMoves(): Promise<Result<AdminMove[], ApiError>> {
   return request("/api/admin/moves");
+}
+
+export function createMove(input: MoveInput): Promise<Result<AdminMove, ApiError>> {
+  return request("/api/admin/moves", withJson("POST", input));
+}
+
+export function updateMove(id: string, input: MoveInput): Promise<Result<AdminMove, ApiError>> {
+  return request(`/api/admin/moves/${encodeURIComponent(id)}`, withJson("PUT", input));
+}
+
+/** What can be retired, by the name it has in the API's paths. */
+export type RetirableKind = "species" | "moves" | "maps" | "skins";
+
+/**
+ * Retires something, or brings it back. The same request either way: the body
+ * says what should be true. Nothing is deleted by this (docs/03-data-model.md).
+ */
+export function setRetired(
+  kind: RetirableKind,
+  id: string,
+  retired: boolean,
+): Promise<Result<{ id: string; retired: boolean }, ApiError>> {
+  return request(
+    `/api/admin/${kind}/${encodeURIComponent(id)}/retired`,
+    withJson("PUT", { retired }),
+  );
 }
 
 export function fetchSkins(): Promise<Result<SkinSummary[], ApiError>> {

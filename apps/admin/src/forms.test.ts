@@ -1,17 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { checkMap, checkSpecies } from "@mba/core";
+import { checkMap, checkMove, checkSpecies } from "@mba/core";
 import type { AdminMap, Species } from "@mba/core";
 
 import {
   blankMapForm,
+  blankMoveForm,
   blankSpeciesForm,
   mapFormOf,
+  moveFormOf,
   moveSpawn,
   paintTile,
   setWeight,
   speciesFormOf,
   toMapInput,
+  toMoveInput,
   toSpeciesInput,
   toggleMove,
 } from "./forms.js";
@@ -43,6 +46,33 @@ const POND: AdminMap = {
   ],
   retired: false,
 };
+
+describe("the move form", () => {
+  const BITE = { id: "bite", name: "かじる", power: 6 };
+
+  it("sends back exactly what it was loaded with, if nothing is edited", () => {
+    expect(toMoveInput(moveFormOf(BITE))).toEqual({ name: "かじる", power: 6 });
+    expect(checkMove(toMoveInput(moveFormOf(BITE))).ok).toBe(true);
+  });
+
+  it("starts a new move with a power the rules accept, and waits for a name", () => {
+    const blank = blankMoveForm();
+    expect(blank.id).toBeNull();
+    expect(checkMove(toMoveInput(blank))).toEqual({ ok: false, error: { kind: "bad_name" } });
+    expect(checkMove(toMoveInput({ ...blank, name: "つつく" })).ok).toBe(true);
+  });
+
+  it("trims the name it sends", () => {
+    expect(toMoveInput({ id: null, name: "  つつく  ", power: 4 }).name).toBe("つつく");
+  });
+
+  it("leaves a cleared power field for the rules to refuse", () => {
+    // What an emptied number input gives. It is sent as it is, and the answer
+    // comes back from the same rule the server uses.
+    const cleared = toMoveInput({ id: null, name: "つつく", power: Number.NaN });
+    expect(checkMove(cleared).ok).toBe(false);
+  });
+});
 
 describe("the species form", () => {
   it("sends back exactly what it was loaded with, if nothing is edited", () => {

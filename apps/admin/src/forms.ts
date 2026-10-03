@@ -1,5 +1,5 @@
 /**
- * The state behind the two edit forms, and how it becomes what the API is sent.
+ * The state behind the edit forms, and how it becomes what the API is sent.
  *
  * Pure, and kept apart from the components so it can be tested against the
  * real rules (`checkSpecies`, `checkMap`). A form and the validator have to
@@ -11,7 +11,39 @@
  */
 
 import { canStandOn, isWalkable } from "@mba/core";
-import type { AdminMap, MapInput, Position, Species, SpeciesInput, TileKind } from "@mba/core";
+import type {
+  AdminMap,
+  MapInput,
+  Move,
+  MoveInput,
+  Position,
+  Species,
+  SpeciesInput,
+  TileKind,
+} from "@mba/core";
+
+// ---------------------------------------------------------------------------
+// Moves
+// ---------------------------------------------------------------------------
+
+export interface MoveForm {
+  /** Null while the move has not been saved yet. */
+  id: string | null;
+  name: string;
+  power: number;
+}
+
+export function blankMoveForm(): MoveForm {
+  return { id: null, name: "", power: 5 };
+}
+
+export function moveFormOf(move: Move): MoveForm {
+  return { id: move.id, name: move.name, power: move.power };
+}
+
+export function toMoveInput(form: MoveForm): MoveInput {
+  return { name: form.name.trim(), power: form.power };
+}
 
 // ---------------------------------------------------------------------------
 // Species
