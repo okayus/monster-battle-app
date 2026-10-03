@@ -225,6 +225,10 @@ function SpeciesEditor({ initial }: { initial: Loaded }) {
             {stat("攻撃", "attack")}
             {stat("防御", "defense")}
           </div>
+          <small>
+            レベル 1 のときの値。プレイヤーのモンスターは、レベルが 1 つ上がるごとに 1/10
+            ずつ増える。
+          </small>
 
           <label>
             見た目{" "}
