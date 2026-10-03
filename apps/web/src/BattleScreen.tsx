@@ -11,12 +11,11 @@ import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { BattleView, CombatantView } from "@mba/core";
-import type { RenderableSkin } from "@mba/sprite";
-import { Sprite } from "@mba/sprite-react";
 
-import { fetchBattle, fetchSkin, playTurn } from "./api.js";
+import { fetchBattle, playTurn } from "./api.js";
 import type { ApiError } from "./api.js";
 import { describeEvent } from "./battle-log.js";
+import { MonsterSprite } from "./MonsterSprite.js";
 import { hrefs } from "./route.js";
 
 type LoadState =
@@ -65,36 +64,7 @@ const field: CSSProperties = { display: "flex", gap: "3rem", flexWrap: "wrap" };
 
 const card: CSSProperties = { display: "grid", gap: "0.25rem", justifyItems: "start" };
 
-// The <svg> has a viewBox and no size of its own, so it fills this box.
-const spriteBox: CSSProperties = {
-  width: "8rem",
-  height: "8rem",
-  border: "1px solid #888",
-  lineHeight: 0,
-};
-
 const row: CSSProperties = { display: "flex", gap: "0.5rem", margin: "0.75rem 0" };
-
-/**
- * A monster's picture, fetched like any other skin. If it cannot be fetched
- * the box stays empty and the battle goes on: a missing picture is not worth
- * stopping a fight for.
- */
-function MonsterSprite({ skinId }: { skinId: string }) {
-  const [skin, setSkin] = useState<RenderableSkin | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetchSkin(skinId).then((result) => {
-      if (!cancelled && result.ok) setSkin(result.value);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [skinId]);
-
-  return <div style={spriteBox}>{skin !== null && <Sprite skin={skin} />}</div>;
-}
 
 function Fighter({
   label,

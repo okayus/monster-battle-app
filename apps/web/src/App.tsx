@@ -6,9 +6,10 @@
  *   settings — account / preferences, and the entry point to the skin editor
  *   editor   — the dot-art editor that produces a skin
  *
- * Four slices are wired up so far: the map you can walk on, battles against
- * what lives in the grass, the skin editor, and choosing what to wear. See
- * docs/05-roadmap.md for the order the rest gets built in.
+ * Five slices are wired up so far: the map you can walk on, battles against
+ * what lives in the grass, the monsters you own, the skin editor, and
+ * choosing what to wear. See docs/05-roadmap.md for the order they were
+ * built in.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
@@ -19,6 +20,7 @@ import { fromSkin, newEditor } from "./editor/model.js";
 import { SkinEditor } from "./editor/SkinEditor.js";
 import { LookScreen } from "./look/LookScreen.js";
 import { MapScreen } from "./MapScreen.js";
+import { MonstersScreen } from "./MonstersScreen.js";
 import { hrefs, parseRoute } from "./route.js";
 import type { Route } from "./route.js";
 import { SavedSkin } from "./SavedSkin.js";
@@ -70,6 +72,9 @@ export function App() {
         <a href={hrefs.map} aria-current={route.screen === "map" ? "page" : undefined}>
           マップ
         </a>
+        <a href={hrefs.monsters} aria-current={route.screen === "monsters" ? "page" : undefined}>
+          なかま
+        </a>
         <a href={hrefs.look} aria-current={route.screen === "look" ? "page" : undefined}>
           きがえ
         </a>
@@ -84,6 +89,8 @@ export function App() {
       {route.screen === "map" && <MapScreen />}
 
       {route.screen === "battle" && <BattleScreen key={route.battleId} id={route.battleId} />}
+
+      {route.screen === "monsters" && <MonstersScreen />}
 
       {route.screen === "look" && <LookScreen />}
 

@@ -38,6 +38,18 @@ describe("parseRoute", () => {
     expect(parseRoute("#/look/anything")).toEqual({ screen: "map" });
   });
 
+  it("shows the player's monsters", () => {
+    expect(parseRoute("#/monsters")).toEqual({ screen: "monsters" });
+  });
+
+  it.each([
+    ["a longer path that starts the same way", "#/monsters/abc"],
+    ["one monster's id, which has no screen of its own", "#/monsters/4da4a65e"],
+    ["the singular", "#/monster"],
+  ])("does not take %s for the monsters screen", (_label, hash) => {
+    expect(parseRoute(hash)).toEqual({ screen: "map" });
+  });
+
   it("shows a battle", () => {
     const id = "53ebc5e6-e3cb-48a9-9bc0-11a896fc57bc";
     expect(parseRoute(`#/battles/${id}`)).toEqual({ screen: "battle", battleId: id });
@@ -53,6 +65,7 @@ describe("parseRoute", () => {
 
   it("round-trips every link the app can produce", () => {
     expect(parseRoute(hrefs.map)).toEqual({ screen: "map" });
+    expect(parseRoute(hrefs.monsters)).toEqual({ screen: "monsters" });
     expect(parseRoute(hrefs.look)).toEqual({ screen: "look" });
     expect(parseRoute(hrefs.editor)).toEqual({ screen: "editor", skinId: null });
     expect(parseRoute(hrefs.skin("abc-123"))).toEqual({ screen: "editor", skinId: "abc-123" });

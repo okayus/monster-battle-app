@@ -12,7 +12,15 @@
  */
 
 import { err, ok } from "@mba/core";
-import type { BattleView, GameMap, Result, SaveData, TurnOutcome, WearableSkin } from "@mba/core";
+import type {
+  BattleView,
+  GameMap,
+  MonsterView,
+  Result,
+  SaveData,
+  TurnOutcome,
+  WearableSkin,
+} from "@mba/core";
 import type { Appearance, RenderableSkin, Skin } from "@mba/sprite";
 
 /**
@@ -135,6 +143,15 @@ export function fetchMap(id: string): Promise<Result<GameMap, ApiError>> {
  */
 export function travelThroughExit(): Promise<Result<SaveData, ApiError>> {
   return request("/api/travel", { method: "POST" });
+}
+
+/**
+ * The player's monsters, the one that fights first. Each arrives with its
+ * level and its health already worked out: the rules for that are the
+ * server's, and this side only shows the answer.
+ */
+export function fetchMonsters(): Promise<Result<MonsterView[], ApiError>> {
+  return request("/api/monsters");
 }
 
 /**
