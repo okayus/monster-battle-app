@@ -94,6 +94,31 @@ export type MapRow = typeof maps.$inferSelect;
 export type NewMapRow = typeof maps.$inferInsert;
 
 /**
+ * The ways out of a map: a player who steps onto (x, y) of one map can go to
+ * (to_x, to_y) of another. Master data, edited with the map it leaves from.
+ *
+ * The tile an exit is on is its key, so a tile has at most one. Both ends are
+ * real references to maps. Whether the tile on the far side can be stood on is
+ * not something a table can say; the API checks it on the way in.
+ */
+export const mapExits = sqliteTable(
+  "map_exits",
+  {
+    mapId: text("map_id")
+      .notNull()
+      .references(() => maps.id),
+    x: integer("x").notNull(),
+    y: integer("y").notNull(),
+    toMapId: text("to_map_id")
+      .notNull()
+      .references(() => maps.id),
+    toX: integer("to_x").notNull(),
+    toY: integer("to_y").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.mapId, table.x, table.y] })],
+);
+
+/**
  * Where each player is. One row per user: the user is the primary key, so
  * saving again replaces the row instead of adding another.
  */
