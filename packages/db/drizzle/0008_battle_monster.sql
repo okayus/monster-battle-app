@@ -1,0 +1,2 @@
+ALTER TABLE `battles` ADD `monster_id` text REFERENCES owned_monsters(id);--> statement-breakpoint
+CREATE UNIQUE INDEX `battles_one_ongoing_per_monster` ON `battles` (`monster_id`) WHERE "battles"."status" = 'ongoing';

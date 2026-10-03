@@ -57,6 +57,13 @@
       "when": 1791036004580,
       "tag": "0007_growth",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1791036427103,
+      "tag": "0008_battle_monster",
+      "breakpoints": true
     }
   ]
 }

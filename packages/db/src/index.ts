@@ -19,6 +19,15 @@ export * from "./schema.js";
 
 export type Db = ReturnType<typeof createDb>;
 
+/** What `db.transaction()` hands its callback: the same queries, inside the transaction. */
+export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/**
+ * Either one. A function that only writes a row or two takes this, so that it
+ * can be called on its own or as one step of a transaction someone else opened.
+ */
+export type DbOrTx = Db | Tx;
+
 /** `file:./data/app.db` and `./data/app.db` are both accepted. */
 function toFilePath(databaseUrl: string): string {
   return databaseUrl.startsWith("file:") ? databaseUrl.slice("file:".length) : databaseUrl;

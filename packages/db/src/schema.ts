@@ -8,7 +8,8 @@
  * variants, which colours), and that recipe is a handful of bytes.
  */
 
-import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
+import { integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * When a row was retired, or null while it is in use.
@@ -268,17 +269,41 @@ export type OwnedMonsterRow = typeof ownedMonsters.$inferSelect;
  * `state` is the whole battle as JSON (both sides' health, the turn count),
  * and it is the only copy: the browser is shown a view of it and sends back
  * nothing but the move it chose. `status` repeats one field of that state as a
- * column so that "the battles still going on" can be asked in SQL.
+ * column so that "the battles still going on" can be asked in SQL — and, as
+ * of the index below, so that the database can hold a rule about them.
  */
-export const battles = sqliteTable("battles", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  status: text("status").notNull(),
-  state: text("state").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
-});
+export const battles = sqliteTable(
+  "battles",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    /**
+     * The monster fighting it. What a battle leaves behind is written to that
+     * monster when the battle ends, so which monster it is gets settled when
+     * the battle starts. Null only on battles begun before monsters kept
+     * anything from one battle to the next; those end the way they began.
+     */
+    monsterId: text("monster_id").references(() => ownedMonsters.id),
+    status: text("status").notNull(),
+    state: text("state").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).notNull(),
+  },
+  (table) => [
+    // A monster is in one battle at a time. Its health carries over from one
+    // battle to the next, and that only means something if the battles come
+    // one after another: started side by side, each would begin from the same
+    // health. Said here, as the shape of the table, and not only in the route
+    // that starts battles, so it holds whoever writes the row.
+    //
+    // Only battles still going on are held to it. Finished ones pile up, as
+    // many per monster as it has fought.
+    uniqueIndex("battles_one_ongoing_per_monster")
+      .on(table.monsterId)
+      .where(sql`${table.status} = 'ongoing'`),
+  ],
+);
 
 export type BattleRow = typeof battles.$inferSelect;
