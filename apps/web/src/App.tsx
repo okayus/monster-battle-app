@@ -6,13 +6,15 @@
  *   settings — account / preferences, and the entry point to the skin editor
  *   editor   — the dot-art editor that produces a skin
  *
- * Two slices are wired up so far: the map you can walk on, and a minimal skin
- * editor. See docs/05-roadmap.md for the order the rest gets built in.
+ * Three slices are wired up so far: the map you can walk on, battles against
+ * what lives in the grass, and a minimal skin editor. See docs/05-roadmap.md
+ * for the order the rest gets built in.
  */
 
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
+import { BattleScreen } from "./BattleScreen.js";
 import { MapScreen } from "./MapScreen.js";
 import { hrefs, parseRoute } from "./route.js";
 import type { Route } from "./route.js";
@@ -72,6 +74,8 @@ export function App() {
       </p>
 
       {route.screen === "map" && <MapScreen />}
+
+      {route.screen === "battle" && <BattleScreen key={route.battleId} id={route.battleId} />}
 
       {route.screen === "editor" && (
         <div style={columns}>

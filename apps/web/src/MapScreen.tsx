@@ -10,11 +10,12 @@
 import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
-import { step } from "@mba/core";
+import { hasWildMonsters, step } from "@mba/core";
 import type { Direction, GameMap, Position, TileKind } from "@mba/core";
 
-import { fetchMap, fetchSave, putSave } from "./api.js";
+import { fetchMap, fetchSave, putSave, startBattle } from "./api.js";
 import type { ApiError } from "./api.js";
+import { hrefs } from "./route.js";
 import { createSaver } from "./saver.js";
 import type { SaveStatus } from "./saver.js";
 
@@ -102,9 +103,12 @@ function saveText(status: SaveStatus<ApiError> | null): string {
   return `保存できなかった（${status.error.kind}）`;
 }
 
+type SearchState = { kind: "idle" } | { kind: "searching" } | { kind: "failed"; error: ApiError };
+
 function MapView({ map, start }: { map: GameMap; start: Position }) {
   const [position, setPosition] = useState(start);
   const [saveStatus, setSaveStatus] = useState<SaveStatus<ApiError> | null>(null);
+  const [search, setSearch] = useState<SearchState>({ kind: "idle" });
 
   // One saver for the life of this view. It serialises the saves, so a burst
   // of steps cannot leave an older position stored last (see saver.ts).
@@ -136,6 +140,25 @@ function MapView({ map, start }: { map: GameMap; start: Position }) {
   }, [map]);
 
   const playerIndex = position.y * map.width + position.x;
+  const here = map.tiles[playerIndex];
+
+  // The server starts a battle on the tile it has stored for the player, not
+  // on the one this screen is showing. So the button waits until the two
+  // agree: either nothing has moved since loading, or the last step is saved.
+  const stored = saveStatus === null || saveStatus.kind === "saved";
+  const inGrass = here !== undefined && hasWildMonsters(here);
+  const canSearch = inGrass && stored && search.kind !== "searching";
+
+  const searchGrass = async () => {
+    setSearch({ kind: "searching" });
+    const result = await startBattle();
+    if (!result.ok) {
+      setSearch({ kind: "failed", error: result.error });
+      return;
+    }
+    // The battle has an address, like everything else worth coming back to.
+    window.location.hash = hrefs.battle(result.value.id);
+  };
 
   return (
     <section aria-label="マップ">
@@ -177,6 +200,15 @@ function MapView({ map, start }: { map: GameMap; start: Position }) {
       <p>
         現在地: ({position.x}, {position.y}) <span role="status">{saveText(saveStatus)}</span>
       </p>
+      <p>
+        <button type="button" disabled={!canSearch} onClick={() => void searchGrass()}>
+          {search.kind === "searching" ? "さがしている…" : "草むらを調べる"}
+        </button>{" "}
+        {inGrass ? "野生のモンスターがいそうだ。" : "草むらに入ると、野生のモンスターを探せる。"}
+      </p>
+      {search.kind === "failed" && (
+        <p role="alert">バトルを始められなかった（{search.error.kind}）</p>
+      )}
       <p>矢印キーか WASD、または上のボタンで歩く。</p>
     </section>
   );

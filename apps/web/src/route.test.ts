@@ -30,9 +30,23 @@ describe("parseRoute", () => {
     expect(parseRoute(hash)).toEqual({ screen: "map" });
   });
 
+  it("shows a battle", () => {
+    const id = "53ebc5e6-e3cb-48a9-9bc0-11a896fc57bc";
+    expect(parseRoute(`#/battles/${id}`)).toEqual({ screen: "battle", battleId: id });
+  });
+
+  it.each([
+    ["a path that climbs out", "#/battles/../../admin"],
+    ["an empty id", "#/battles/"],
+    ["something after the id", "#/battles/abc/turn"],
+  ])("does not take %s for a battle id", (_label, hash) => {
+    expect(parseRoute(hash)).toEqual({ screen: "map" });
+  });
+
   it("round-trips every link the app can produce", () => {
     expect(parseRoute(hrefs.map)).toEqual({ screen: "map" });
     expect(parseRoute(hrefs.editor)).toEqual({ screen: "editor", skinId: null });
     expect(parseRoute(hrefs.skin("abc-123"))).toEqual({ screen: "editor", skinId: "abc-123" });
+    expect(parseRoute(hrefs.battle("abc-123"))).toEqual({ screen: "battle", battleId: "abc-123" });
   });
 });

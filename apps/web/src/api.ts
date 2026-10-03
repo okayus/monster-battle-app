@@ -12,7 +12,7 @@
  */
 
 import { err, ok } from "@mba/core";
-import type { GameMap, Result, SaveData } from "@mba/core";
+import type { BattleView, GameMap, Result, SaveData, TurnOutcome } from "@mba/core";
 import type { RenderableSkin, Skin } from "@mba/sprite";
 
 /**
@@ -93,4 +93,33 @@ export function putSave(save: SaveData): Promise<Result<SaveData, ApiError>> {
 
 export function fetchMap(id: string): Promise<Result<GameMap, ApiError>> {
   return request(`/api/maps/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Starts a battle on the tile the server has the player on. There is nothing
+ * to send: where the player is and who turns up are both the server's to say.
+ */
+export function startBattle(): Promise<Result<BattleView, ApiError>> {
+  return request("/api/battles", { method: "POST" });
+}
+
+export function fetchBattle(id: string): Promise<Result<BattleView, ApiError>> {
+  return request(`/api/battles/${encodeURIComponent(id)}`);
+}
+
+/**
+ * Plays one turn. The move is the only thing the browser decides; `turn` is
+ * the count it was last shown, so that a request sent twice is refused the
+ * second time instead of playing two turns.
+ */
+export function playTurn(
+  id: string,
+  moveId: string,
+  turn: number,
+): Promise<Result<TurnOutcome, ApiError>> {
+  return request(`/api/battles/${encodeURIComponent(id)}/turn`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ moveId, turn }),
+  });
 }

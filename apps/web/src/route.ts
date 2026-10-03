@@ -7,22 +7,29 @@
  * `<a href>`, so back, forward and reload work without any code.
  *
  *   #/              the map (and anything unrecognised)
+ *   #/battles/<id>  a battle
  *   #/editor        the skin editor
  *   #/skins/<id>    the skin editor, showing a saved skin
  */
 
-export type Route = { screen: "map" } | { screen: "editor"; skinId: string | null };
+export type Route =
+  | { screen: "map" }
+  | { screen: "battle"; battleId: string }
+  | { screen: "editor"; skinId: string | null };
 
 /**
  * Only admits the characters an id is made of, so whatever else someone types
  * into the address bar never reaches a request.
  */
 const SKIN_HASH = /^#\/skins\/([0-9a-f-]{1,64})$/;
+const BATTLE_HASH = /^#\/battles\/([0-9a-f-]{1,64})$/;
 
 export function parseRoute(hash: string): Route {
   if (hash === "#/editor") return { screen: "editor", skinId: null };
   const skinId = SKIN_HASH.exec(hash)?.[1];
   if (skinId !== undefined) return { screen: "editor", skinId };
+  const battleId = BATTLE_HASH.exec(hash)?.[1];
+  if (battleId !== undefined) return { screen: "battle", battleId };
   return { screen: "map" };
 }
 
@@ -31,4 +38,5 @@ export const hrefs = {
   map: "#/",
   editor: "#/editor",
   skin: (id: string) => `#/skins/${id}`,
+  battle: (id: string) => `#/battles/${id}`,
 } as const;
