@@ -32,8 +32,8 @@ dev コンテナで同じ検査を回すのとの違いは、**まっさらな�
 
 | 段 | 道具 | 相手 | 件数 |
 |---|---|---|---|
-| 単体・API | Vitest | 純粋関数と、インメモリの SQLite を渡した API（`app.request()`） | 621 |
-| 画面 | Playwright と Chromium | 本番イメージのコンテナ | 51 |
+| 単体・API | Vitest | 純粋関数と、インメモリの SQLite を渡した API（`app.request()`） | 679 |
+| 画面 | Playwright と Chromium | 本番イメージのコンテナ | 58 |
 
 **規則は下の段で、組み立ては上の段で確かめる。** ダメージの式、スキンの検証、マップの規則は、単体テストが決め打ちの入力で
 隅まで見ている。画面のテストはそれをやり直さない。見るのは部品がつながっていること——ボタンを押すとリクエストが飛び、
@@ -110,6 +110,16 @@ lockfile を持つ。Docker のビルドコンテキストも別（アプリ側�
 - **一覧の並びを当てにしない。** 「先頭にあるはず」ではなく、名前で選ぶ。ほかのテストが一覧に足すので、
   何が先頭に来るかは、どのテストが先に走ったかで変わる。空の DB からの 1 回目では通ってしまうので、
   同じサーバに続けて走らせて確かめる
+- **本物のマウスでなぞるときは、なぞる範囲が画面に入っていること。** 画面の外にあるものは押せないので、
+  なぞりが途中で切れて、何も言わずに少なく塗る。`stroke()` は始点を画面の中央に寄せ、終点が外なら落ちる。
+  データが増えると画面の形は変わるので、これも同じサーバに続けて走らせると出てくる
+- **キーを押すのは、画面が読み込み終わってから。** マップが出る前に押したキーは、聞いているものがまだ無いので、
+  どこにも届かない。開いた直後に押すテストは、まずマップと現在地が出たことを待つ
+- **期待する値が、たまたま最初からそうなっていないかを見る。** 「選ぶとこの値になる」を確かめるなら、
+  選ぶ前に別の値にしておく。何が既定で入るかが、ほかのテストの残したものに左右されるときは特に
+- **前提を作る補助関数も、API に断られうる。** 断られたら、その場で落とす（`expect(response.ok())`）。
+  断られたまま先へ進むテストは、確かめたいことの前提が無いまま通ることがある。プレイヤーを別のマップに置くのは、
+  保存ではなく、出口を開けて通す補助関数（`visit()`）で
 - **ページが投げた例外は、テストの失敗にする**（`failOnPageErrors()`）。画面が見かけ上動いていても、誰も受けなかった例外は不具合
 
 ## 書いたテストは、壊して確かめる
@@ -161,6 +171,17 @@ lockfile を持つ。Docker のビルドコンテキストも別（アプリ側�
 | 種族が覚えている技でも外せる | `will not retire a move a species still knows, and does once the species gives it up` |
 | retire 済みの技を覚えた種族でも戻せる | `says what has to come back first when a species still knows a retired move` |
 | 最初のマップと既定のスキンも外せる | `will not retire what everything else falls back to` ほか 1 本 |
+| 「サーバがその位置を知っている」を、保存の表示から読む | `asks to go through only once the step onto the exit has been saved` |
+| 出口に着いただけで、通ってしまう | `does nothing on arriving on an exit, and goes back through it once stepped onto` |
+| マップを移っている間も、キーで歩ける | `holds the player still while the server is taking them through` |
+| マップに出口を描かない | `marks the way out, and takes the player through it when they step on it` |
+| 出口を通れなかったとき、何も出さない | `says so when the server will not let the player through, and lets them walk on` |
+| travel が、プレイヤーを動かさずに答える | `marks the way out, and takes the player through it when they step on it` ほか 6 本 |
+| 出口が、立てないタイルに着いてもよい | `is set up from the admin screen: an exit put on a map is one a player can take` |
+| 出口の筆が、押した瞬間とクリックの両方で効く | 同上 |
+| 行き先のマップを選んでも、位置が前のまま | 同上 |
+| 管理画面のタイルに、出口の印を付けない | 同上 |
+| 木の上にも出口を置ける | 同上 |
 
 `check` の方も同じように確かめてある。型エラー、lint 違反、整形されていない行、成り立たなくなった単体テストは、
 それぞれ自分の `RUN` で落ちる。
