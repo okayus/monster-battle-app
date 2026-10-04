@@ -18,6 +18,8 @@ import type { Context, MiddlewareHandler } from "hono";
 import { users } from "@mba/db";
 import type { Db, Read } from "@mba/db";
 
+import { refuse } from "./refusals.js";
+
 declare const vouchedFor: unique symbol;
 
 /**
@@ -74,7 +76,7 @@ export function requireAdmin(read: Read): MiddlewareHandler {
       .from(users)
       .where(eq(users.id, getUserId(c)))
       .get();
-    if (user?.isAdmin !== true) return c.json({ error: { kind: "forbidden" } }, 403);
+    if (user?.isAdmin !== true) return refuse(c, { kind: "forbidden" });
     await next();
   };
 }

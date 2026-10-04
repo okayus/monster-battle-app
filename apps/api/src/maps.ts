@@ -2,8 +2,8 @@
  * Maps: reading them out of the database, and making sure there is one to
  * start on.
  *
- * Maps are master data. They will be edited from the admin screen (Step 5 in
- * docs/05-roadmap.md); until that exists, the only map is the one seeded here.
+ * Maps are master data, edited from the admin screen. What an admin may store
+ * is decided in master.ts; the map every game starts on is seeded here.
  */
 
 import { and, asc, eq, isNull, ne } from "drizzle-orm";
@@ -14,7 +14,6 @@ import type {
   Encounter,
   GameMap,
   MapExit,
-  MapInput,
   MasterReference,
   Position,
   Result,
@@ -77,7 +76,7 @@ export function findMap(read: Read, id: string): GameMap | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// What the admin API reads and writes
+// What the admin API reads
 // ---------------------------------------------------------------------------
 
 function encounterRowsOf(read: Read, mapId: string): Encounter[] {
@@ -142,48 +141,6 @@ export function listMaps(read: Read): AdminMap[] {
     if (found !== undefined) all.push(found);
   }
   return all;
-}
-
-/**
- * Creates or replaces a map together with its encounters and its exits, in one
- * transaction, for the same reason a species is saved with its moves: they are
- * edited as one thing. Both lists are replaced, so leaving a species or an exit
- * out is how it goes away.
- */
-export function saveMap(db: Db, id: string, input: MapInput): void {
-  const row = {
-    name: input.name,
-    width: input.width,
-    height: input.height,
-    tiles: JSON.stringify(input.tiles),
-    spawnX: input.spawn.x,
-    spawnY: input.spawn.y,
-  };
-  db.transaction((tx) => {
-    tx.insert(maps)
-      .values({ id, ...row })
-      .onConflictDoUpdate({ target: maps.id, set: row })
-      .run();
-    tx.delete(mapEncounters).where(eq(mapEncounters.mapId, id)).run();
-    for (const { speciesId, weight } of input.encounters) {
-      tx.insert(mapEncounters).values({ mapId: id, speciesId, weight }).run();
-    }
-    // Only the exits that leave this map. Exits that arrive here belong to
-    // the maps they leave from.
-    tx.delete(mapExits).where(eq(mapExits.mapId, id)).run();
-    for (const { at, to } of input.exits) {
-      tx.insert(mapExits)
-        .values({
-          mapId: id,
-          x: at.x,
-          y: at.y,
-          toMapId: to.mapId,
-          toX: to.position.x,
-          toY: to.position.y,
-        })
-        .run();
-    }
-  });
 }
 
 // ---------------------------------------------------------------------------

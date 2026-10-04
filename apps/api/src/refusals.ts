@@ -16,23 +16,30 @@
 
 import type { Context } from "hono";
 
+import type { MoveError, RetireError } from "@mba/core";
 import type { SkinError } from "@mba/sprite";
 
 import type { LookError } from "./appearance.js";
 import type { BeginError, TurnError } from "./battles.js";
 import type { BodyError } from "./http.js";
+import type { MapRefusal, SpeciesRefusal } from "./master.js";
 import type { SaveError, TravelError } from "./saves.js";
 
 export type Refusal =
   | BodyError
   | { kind: "body_too_large"; max: number }
+  | { kind: "forbidden" }
   | { kind: "not_found" }
   | SaveError
   | TravelError
   | BeginError
   | TurnError
   | SkinError
-  | LookError;
+  | LookError
+  | MoveError
+  | SpeciesRefusal
+  | MapRefusal
+  | RetireError;
 
 /**
  * 400 the request is wrong, 403 the caller may not, 404 there is no such
@@ -45,6 +52,7 @@ const STATUS = {
   bad_json: 400,
   malformed: 400,
   body_too_large: 413,
+  forbidden: 403,
   not_found: 404,
 
   // Where the player is.
@@ -78,6 +86,34 @@ const STATUS = {
   missing_slot: 400,
   unknown_skin: 400,
   unknown_colour: 400,
+
+  // Master data: the rules it has to satisfy (`checkMove`, `checkSpecies`,
+  // `checkMap` in `@mba/core`) …
+  bad_name: 400,
+  bad_power: 400,
+  bad_stat: 400,
+  bad_move_count: 400,
+  duplicate_move: 400,
+  bad_size: 400,
+  bad_tile_count: 400,
+  bad_spawn: 400,
+  bad_weight: 400,
+  duplicate_encounter: 400,
+  too_many_exits: 400,
+  bad_exit: 400,
+  duplicate_exit: 400,
+  // … what it may refer to …
+  unknown_species: 400,
+  retired_skin: 400,
+  retired_move: 400,
+  retired_species: 400,
+  retired_map: 400,
+  bad_exit_destination: 400,
+  blocks_exit: 400,
+  // … and what stands in the way of retiring something, or bringing it back.
+  in_use: 400,
+  depends_on_retired: 400,
+  protected: 400,
 } as const satisfies Record<Refusal["kind"], Status>;
 
 /** Answers with an error: the value as it is, under the status its kind has. */

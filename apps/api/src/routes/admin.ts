@@ -23,39 +23,36 @@
  *
  * Every route here is behind the same check, attached once at the top of this
  * router. Adding a route below cannot forget it.
+ *
+ * What is here is the HTTP part only. Whether a move, a species or a map may
+ * be stored is decided in master.ts, and whether something may be retired in
+ * retirement.ts. What a write answers with is read back out of the database
+ * afterwards, by the function its list uses: what is on screen straight after
+ * saving is what a reload would show.
  */
 
 import { Hono } from "hono";
-import type { Context } from "hono";
 import { z } from "zod";
 
-import { TILE_KINDS, canStandOn, checkMap, checkMove, checkSpecies, err, ok } from "@mba/core";
-import type {
-  MapError,
-  MapExit,
-  MapInput,
-  MasterReference,
-  MoveError,
-  MoveInput,
-  Result,
-  SpeciesError,
-  SpeciesInput,
-} from "@mba/core";
-import type { Db } from "@mba/db";
+import { TILE_KINDS } from "@mba/core";
+import type { MapInput, MoveInput, SpeciesInput } from "@mba/core";
 
 import { requireAdmin } from "../auth.js";
-import { jsonBodyLimit, parseShape, readJson } from "../http.js";
-import { exitsInto, findAdminMap, listMaps, saveMap } from "../maps.js";
+import { jsonBodyLimit, readBody } from "../http.js";
+import { findAdminMap, listMaps } from "../maps.js";
 import {
-  findAdminSpecies,
-  findMove,
-  listMoves,
-  listSpecies,
-  saveMove,
-  saveSpecies,
-} from "../monsters.js";
-import { RETIRABLE, firstUnusable, livenessOf, setRetired } from "../retirement.js";
+  createMap,
+  createMove,
+  createSpecies,
+  replaceMap,
+  replaceMove,
+  replaceSpecies,
+} from "../master.js";
+import { findAdminSpecies, findMove, listMoves, listSpecies } from "../monsters.js";
+import { refuse } from "../refusals.js";
+import { RETIRABLE, setRetired } from "../retirement.js";
 import type { Retirable } from "../retirement.js";
+import type { Runtime } from "../runtime.js";
 import { findSkinSummary, listSkins } from "../skins.js";
 
 /** A species is a handful of numbers and ids. */
@@ -107,217 +104,84 @@ const moveSchema: z.ZodType<MoveInput> = z.object({
 
 const retiredSchema = z.object({ retired: z.boolean() });
 
-type InputError =
-  | { kind: "bad_json" }
-  | { kind: "malformed"; at: string }
-  /** The thing referred to does not exist … */
-  | { kind: "unknown_skin"; skinId: string }
-  | { kind: "unknown_move"; moveId: string }
-  | { kind: "unknown_species"; speciesId: string }
-  | { kind: "unknown_map"; mapId: string }
-  /** … or it does, and has been retired: nothing new may point at it. */
-  | { kind: "retired_skin"; skinId: string }
-  | { kind: "retired_move"; moveId: string }
-  | { kind: "retired_species"; speciesId: string }
-  | { kind: "retired_map"; mapId: string }
-  /** An exit has to arrive on a tile of the other map that can be stood on. */
-  | { kind: "bad_exit_destination"; exit: MapExit }
-  /** Redrawing this map would put something unwalkable where another map's exit arrives. */
-  | { kind: "blocks_exit"; by: MasterReference[] };
-
-export function adminRoutes(db: Db) {
+export function adminRoutes({ read, perform }: Runtime) {
   const routes = new Hono();
 
   // The one place authorization for the admin API is decided.
-  routes.use("*", requireAdmin(db));
+  routes.use("*", requireAdmin(read));
 
   // -------------------------------------------------------------------------
   // Species
   // -------------------------------------------------------------------------
 
-  /**
-   * A request body as a species that is safe to store: shape, then the game's
-   * rules, then whether the things it refers to exist. Each step only runs if
-   * the one before it passed, and all of them come out as one error value.
-   */
-  async function readSpecies(c: Context): Promise<Result<SpeciesInput, InputError | SpeciesError>> {
-    const body = await readJson(c);
-    if (!body.ok) return body;
-    const shape = parseShape(speciesSchema, body.value);
-    if (!shape.ok) return shape;
-    const checked = checkSpecies(shape.value);
-    if (!checked.ok) return checked;
-
-    const input = checked.value;
-    // The database would refuse a missing one too (foreign keys), but by
-    // throwing. Asking first turns "that skin does not exist" into an answer.
-    // A retired one the database would accept; refusing it is this API's rule.
-    const skin = firstUnusable(db, "skins", [input.skinId]);
-    if (skin !== undefined) {
-      return err({
-        kind: skin.why === "missing" ? "unknown_skin" : "retired_skin",
-        skinId: skin.id,
-      });
-    }
-    const move = firstUnusable(db, "moves", input.moveIds);
-    if (move !== undefined) {
-      return err({
-        kind: move.why === "missing" ? "unknown_move" : "retired_move",
-        moveId: move.id,
-      });
-    }
-    return ok(input);
-  }
-
-  routes.get("/species", (c) => c.json(listSpecies(db)));
+  routes.get("/species", (c) => c.json(listSpecies(read)));
 
   routes.post("/species", jsonBodyLimit(MAX_SPECIES_BYTES), async (c) => {
-    const input = await readSpecies(c);
-    if (!input.ok) return c.json({ error: input.error }, 400);
+    const body = await readBody(c, speciesSchema);
+    if (!body.ok) return refuse(c, body.error);
 
-    // The id is the server's to choose. A body that carries one is ignored.
-    const id = crypto.randomUUID();
-    saveSpecies(db, id, input.value);
-    return c.json(findAdminSpecies(db, id), 201, { Location: `/api/admin/species/${id}` });
+    const saved = perform((world) => createSpecies(world, body.value));
+    if (!saved.ok) return refuse(c, saved.error);
+
+    const { id } = saved.value;
+    return c.json(findAdminSpecies(read, id), 201, { Location: `/api/admin/species/${id}` });
   });
 
   routes.put("/species/:id", jsonBodyLimit(MAX_SPECIES_BYTES), async (c) => {
-    const id = c.req.param("id");
-    // PUT replaces; it does not create. Ids are handed out by POST.
-    if (livenessOf(db, "species", id) === "missing") {
-      return c.json({ error: { kind: "not_found" } }, 404);
-    }
-
-    const input = await readSpecies(c);
-    if (!input.ok) return c.json({ error: input.error }, 400);
-
-    saveSpecies(db, id, input.value);
-    return c.json(findAdminSpecies(db, id));
+    // The body is handed over as it was read, good or bad: a species that is
+    // not there is "not found" before anything is said about the body.
+    const body = await readBody(c, speciesSchema);
+    const saved = perform((world) => replaceSpecies(world, c.req.param("id"), body));
+    if (!saved.ok) return refuse(c, saved.error);
+    return c.json(findAdminSpecies(read, saved.value.id));
   });
 
   // -------------------------------------------------------------------------
   // Maps
   // -------------------------------------------------------------------------
 
-  /**
-   * `id` is the map being replaced, or undefined for one that is being
-   * created. It matters for exits, which are the one thing in a map that can
-   * refer to the map itself — and to which other maps refer.
-   */
-  async function readMap(
-    c: Context,
-    id?: string,
-  ): Promise<Result<MapInput, InputError | MapError>> {
-    const body = await readJson(c);
-    if (!body.ok) return body;
-    const shape = parseShape(mapSchema, body.value);
-    if (!shape.ok) return shape;
-    const checked = checkMap(shape.value);
-    if (!checked.ok) return checked;
-
-    const input = checked.value;
-    const kind = firstUnusable(
-      db,
-      "species",
-      input.encounters.map((encounter) => encounter.speciesId),
-    );
-    if (kind !== undefined) {
-      return err({
-        kind: kind.why === "missing" ? "unknown_species" : "retired_species",
-        speciesId: kind.id,
-      });
-    }
-
-    // Where the exits lead. An exit back onto this same map is judged against
-    // the tiles being saved, not the ones in the database.
-    const elsewhere = input.exits.filter((exit) => exit.to.mapId !== id);
-    const target = firstUnusable(
-      db,
-      "maps",
-      elsewhere.map((exit) => exit.to.mapId),
-    );
-    if (target !== undefined) {
-      return err({
-        kind: target.why === "missing" ? "unknown_map" : "retired_map",
-        mapId: target.id,
-      });
-    }
-    for (const exit of input.exits) {
-      const far = exit.to.mapId === id ? input : findAdminMap(db, exit.to.mapId);
-      if (far === undefined || !canStandOn(far, exit.to.position)) {
-        return err({ kind: "bad_exit_destination", exit });
-      }
-    }
-
-    // And the exits that lead here, from other maps. They live in those maps'
-    // data, so this edit cannot fix them — it can only not break them.
-    if (id !== undefined) {
-      const blocked = exitsInto(db, id).filter((exit) => !canStandOn(input, exit.lands));
-      if (blocked.length > 0) {
-        const by = new Map(blocked.map((exit) => [exit.from.id, exit.from]));
-        return err({ kind: "blocks_exit", by: [...by.values()] });
-      }
-    }
-    return ok(input);
-  }
-
-  routes.get("/maps", (c) => c.json(listMaps(db)));
+  routes.get("/maps", (c) => c.json(listMaps(read)));
 
   routes.post("/maps", jsonBodyLimit(MAX_MAP_BYTES), async (c) => {
-    const input = await readMap(c);
-    if (!input.ok) return c.json({ error: input.error }, 400);
+    const body = await readBody(c, mapSchema);
+    if (!body.ok) return refuse(c, body.error);
 
-    const id = crypto.randomUUID();
-    saveMap(db, id, input.value);
-    return c.json(findAdminMap(db, id), 201, { Location: `/api/admin/maps/${id}` });
+    const saved = perform((world) => createMap(world, body.value));
+    if (!saved.ok) return refuse(c, saved.error);
+
+    const { id } = saved.value;
+    return c.json(findAdminMap(read, id), 201, { Location: `/api/admin/maps/${id}` });
   });
 
   routes.put("/maps/:id", jsonBodyLimit(MAX_MAP_BYTES), async (c) => {
-    const id = c.req.param("id");
-    if (findAdminMap(db, id) === undefined) return c.json({ error: { kind: "not_found" } }, 404);
-
-    const input = await readMap(c, id);
-    if (!input.ok) return c.json({ error: input.error }, 400);
-
-    saveMap(db, id, input.value);
-    return c.json(findAdminMap(db, id));
+    const body = await readBody(c, mapSchema);
+    const saved = perform((world) => replaceMap(world, c.req.param("id"), body));
+    if (!saved.ok) return refuse(c, saved.error);
+    return c.json(findAdminMap(read, saved.value.id));
   });
 
   // -------------------------------------------------------------------------
   // Moves
   // -------------------------------------------------------------------------
 
-  /** Shape, then the rule. A move refers to nothing, so there is no third step. */
-  async function readMove(c: Context): Promise<Result<MoveInput, InputError | MoveError>> {
-    const body = await readJson(c);
-    if (!body.ok) return body;
-    const shape = parseShape(moveSchema, body.value);
-    if (!shape.ok) return shape;
-    return checkMove(shape.value);
-  }
-
-  routes.get("/moves", (c) => c.json(listMoves(db)));
+  routes.get("/moves", (c) => c.json(listMoves(read)));
 
   routes.post("/moves", jsonBodyLimit(MAX_SMALL_BYTES), async (c) => {
-    const input = await readMove(c);
-    if (!input.ok) return c.json({ error: input.error }, 400);
+    const body = await readBody(c, moveSchema);
+    if (!body.ok) return refuse(c, body.error);
 
-    const id = crypto.randomUUID();
-    saveMove(db, id, input.value);
-    return c.json(findMove(db, id), 201, { Location: `/api/admin/moves/${id}` });
+    const saved = perform((world) => createMove(world, body.value));
+    if (!saved.ok) return refuse(c, saved.error);
+
+    const { id } = saved.value;
+    return c.json(findMove(read, id), 201, { Location: `/api/admin/moves/${id}` });
   });
 
   routes.put("/moves/:id", jsonBodyLimit(MAX_SMALL_BYTES), async (c) => {
-    const id = c.req.param("id");
-    if (livenessOf(db, "moves", id) === "missing") {
-      return c.json({ error: { kind: "not_found" } }, 404);
-    }
-
-    const input = await readMove(c);
-    if (!input.ok) return c.json({ error: input.error }, 400);
-
-    saveMove(db, id, input.value);
-    return c.json(findMove(db, id));
+    const body = await readBody(c, moveSchema);
+    const saved = perform((world) => replaceMove(world, c.req.param("id"), body));
+    if (!saved.ok) return refuse(c, saved.error);
+    return c.json(findMove(read, saved.value.id));
   });
 
   // -------------------------------------------------------------------------
@@ -327,7 +191,7 @@ export function adminRoutes(db: Db) {
   // API. What an admin can do to one is retire it, below.
   // -------------------------------------------------------------------------
 
-  routes.get("/skins", (c) => c.json(listSkins(db)));
+  routes.get("/skins", (c) => c.json(listSkins(read)));
 
   // -------------------------------------------------------------------------
   // Retiring — one route shape for all four kinds
@@ -335,10 +199,10 @@ export function adminRoutes(db: Db) {
 
   /** One of them, as its list shows it. */
   const viewOf = (kind: Retirable, id: string) => {
-    if (kind === "species") return findAdminSpecies(db, id);
-    if (kind === "moves") return findMove(db, id);
-    if (kind === "maps") return findAdminMap(db, id);
-    return findSkinSummary(db, id);
+    if (kind === "species") return findAdminSpecies(read, id);
+    if (kind === "moves") return findMove(read, id);
+    if (kind === "maps") return findAdminMap(read, id);
+    return findSkinSummary(read, id);
   };
 
   for (const kind of RETIRABLE) {
@@ -347,15 +211,11 @@ export function adminRoutes(db: Db) {
     // the same request with the other value.
     routes.put(`/${kind}/:id/retired`, jsonBodyLimit(MAX_SMALL_BYTES), async (c) => {
       const id = c.req.param("id");
-      const body = await readJson(c);
-      if (!body.ok) return c.json({ error: body.error }, 400);
-      const shape = parseShape(retiredSchema, body.value);
-      if (!shape.ok) return c.json({ error: shape.error }, 400);
+      const body = await readBody(c, retiredSchema);
+      if (!body.ok) return refuse(c, body.error);
 
-      const done = setRetired(db, kind, id, shape.value.retired, new Date());
-      if (!done.ok) {
-        return c.json({ error: done.error }, done.error.kind === "not_found" ? 404 : 400);
-      }
+      const done = perform((world) => setRetired(world, kind, id, body.value.retired));
+      if (!done.ok) return refuse(c, done.error);
       return c.json(viewOf(kind, id));
     });
   }

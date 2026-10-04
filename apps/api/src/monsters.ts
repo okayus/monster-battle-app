@@ -1,21 +1,13 @@
 /**
- * Monsters: reading species, encounters and a player's monsters out of the
- * database, in the shapes the battle rules use (`@mba/core`).
+ * Monsters: reading species, moves, encounters and a player's monsters out of
+ * the database, in the shapes the battle rules use (`@mba/core`).
  */
 
 import { asc, eq } from "drizzle-orm";
 
-import type {
-  AdminMove,
-  AdminSpecies,
-  MoveInput,
-  OwnedMonster,
-  Species,
-  SpeciesInput,
-  Weighted,
-} from "@mba/core";
+import type { AdminMove, AdminSpecies, OwnedMonster, Species, Weighted } from "@mba/core";
 import { mapEncounters, moves, ownedMonsters, species, speciesMoves } from "@mba/db";
-import type { Db, Read } from "@mba/db";
+import type { Read } from "@mba/db";
 
 import type { UserId } from "./auth.js";
 
@@ -106,7 +98,7 @@ export function leadMonsterOf(read: Read, userId: UserId): OwnedMonster | undefi
 }
 
 // ---------------------------------------------------------------------------
-// What the admin API reads and writes
+// What the admin API reads
 // ---------------------------------------------------------------------------
 
 /** A species with the mark an admin needs to see: whether it has been retired. */
@@ -156,44 +148,4 @@ export function findMove(read: Read, id: string): AdminMove | undefined {
   const row = read.select().from(moves).where(eq(moves.id, id)).get();
   if (row === undefined) return undefined;
   return { id: row.id, name: row.name, power: row.power, retired: row.retiredAt !== null };
-}
-
-/**
- * Creates or replaces a move. Whether it is retired is not part of what is
- * saved here: editing a move leaves that as it was.
- */
-export function saveMove(db: Db, id: string, input: MoveInput): void {
-  const row = { name: input.name, power: input.power };
-  db.insert(moves)
-    .values({ id, ...row })
-    .onConflictDoUpdate({ target: moves.id, set: row })
-    .run();
-}
-
-/**
- * Creates or replaces a species together with the moves it knows.
- *
- * One transaction, because a species and its moves are one thing to the
- * person editing them: a species row with last time's moves still attached
- * would be a state nobody asked for. The moves are replaced, not merged, so
- * unticking one in the form is how it gets removed.
- */
-export function saveSpecies(db: Db, id: string, input: SpeciesInput): void {
-  const row = {
-    name: input.name,
-    maxHp: input.maxHp,
-    attack: input.attack,
-    defense: input.defense,
-    skinId: input.skinId,
-  };
-  db.transaction((tx) => {
-    tx.insert(species)
-      .values({ id, ...row })
-      .onConflictDoUpdate({ target: species.id, set: row })
-      .run();
-    tx.delete(speciesMoves).where(eq(speciesMoves.speciesId, id)).run();
-    for (const moveId of input.moveIds) {
-      tx.insert(speciesMoves).values({ speciesId: id, moveId }).run();
-    }
-  });
 }

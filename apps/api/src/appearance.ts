@@ -25,10 +25,10 @@ import {
   parseAppearance,
   skinsNamedBy,
 } from "@mba/sprite";
-import type { Appearance, AppearanceError, PaletteEntry, Parsed } from "@mba/sprite";
+import type { Appearance, AppearanceError, PaletteEntry } from "@mba/sprite";
 
 import type { UserId } from "./auth.js";
-import type { Resolved } from "./changes.js";
+import { resolved } from "./changes.js";
 import type { Decision, World } from "./runtime.js";
 import { renderablesOf, wearableSkinIds } from "./skins.js";
 
@@ -127,9 +127,8 @@ export function chooseLook(
   }
 
   // Everything it names has been looked up. This is the line that says so.
-  const resolved = appearance as Resolved<Parsed<Appearance>>;
   return ok({
     answer: appearance,
-    changes: [{ kind: "look_chosen", userId, appearance: resolved }],
+    changes: [{ kind: "look_chosen", userId, appearance: resolved(appearance) }],
   });
 }

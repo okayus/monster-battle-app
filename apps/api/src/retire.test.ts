@@ -18,6 +18,7 @@ import type { Appearance, PaletteEntry, PartSlot } from "@mba/sprite";
 
 import { DEFAULT_SKIN_ID } from "./appearance.js";
 import { START_MAP_ID } from "./maps.js";
+import { setRetired as decideRetired } from "./retirement.js";
 import { firstTile, rolls, setup, starter, visit } from "./testing.js";
 import type { TestApp } from "./testing.js";
 
@@ -240,6 +241,29 @@ describe("PUT /api/admin/:kind/:id/retired", () => {
     // Bringing back what is already in use is not an error either.
     await restore(app, "moves", id);
     expect((await setRetired(app, "moves", id, false)).status).toBe(200);
+  });
+
+  it("decides nothing the second time: asked again, the same request has no change to make", async () => {
+    const { app, db } = setup();
+    const id = await createMove(app);
+
+    // Asked of the decision itself, which says what it would write.
+    const decide = (retired: boolean) => decideRetired({ read: db }, "moves", id, retired);
+    expect(decide(true)).toEqual({
+      ok: true,
+      value: {
+        answer: undefined,
+        changes: [{ kind: "retired_set", what: "moves", id, retired: true }],
+      },
+    });
+    expect(decide(false)).toEqual({ ok: true, value: { answer: undefined, changes: [] } });
+
+    await retire(app, "moves", id);
+    expect(decide(true)).toEqual({ ok: true, value: { answer: undefined, changes: [] } });
+    expect(decide(false)).toMatchObject({
+      ok: true,
+      value: { changes: [{ kind: "retired_set", retired: false }] },
+    });
   });
 
   it("leaves editing and retiring apart: a PUT on the move does not bring it back", async () => {

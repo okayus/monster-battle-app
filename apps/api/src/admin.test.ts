@@ -254,6 +254,45 @@ describe("PUT /api/admin/species/:id", () => {
     expect(db.select().from(species).all()).toHaveLength(3);
   });
 
+  it.each(["species", "moves", "maps"])(
+    "says a %s id is unknown before it says anything about the body",
+    async (kind) => {
+      // PUT replaces and never creates, so what was sent to replace it with
+      // does not come into it: not JSON, not the right shape, not within the
+      // rules — the answer is that there is nothing there to replace.
+      const { app } = setup();
+      for (const body of ["{ not json", { name: 1 }, { name: "", power: 0, maxHp: 0 }]) {
+        const res = await send(app, "PUT", `/${kind}/no-such-thing`, body);
+        expect(res.status).toBe(404);
+        expect(await res.json()).toEqual({ error: { kind: "not_found" } });
+      }
+    },
+  );
+
+  it("takes the id of everything it creates from the app, whatever the body says", async () => {
+    const ids = ["a-move", "a-species", "a-map"];
+    const { app, db } = setup({ newId: () => ids.shift() ?? "none-left" });
+    const chosen = { id: "chosen-by-the-client" };
+
+    const move = await send(app, "POST", "/moves", { name: "つつく", power: 4, ...chosen });
+    expect(move.headers.get("Location")).toBe("/api/admin/moves/a-move");
+
+    const kind = await send(app, "POST", "/species", {
+      ...speciesInput({ moveIds: ["a-move"] }),
+      ...chosen,
+    });
+    expect(((await kind.json()) as AdminSpecies).id).toBe("a-species");
+
+    const map = await send(app, "POST", "/maps", {
+      ...starterInput({ name: "べつの草原" }),
+      ...chosen,
+    });
+    expect(((await map.json()) as AdminMap).id).toBe("a-map");
+
+    expect(db.select().from(moves).where(eq(moves.id, "chosen-by-the-client")).all()).toEqual([]);
+    expect(findSpecies(db, "a-species")?.moves.map((known) => known.id)).toEqual(["a-move"]);
+  });
+
   it("does not reach into a battle that has already started", async () => {
     // The player's monster is a moss. Two battles against a drop: one started
     // before moss is edited, and the next one after. Every roll is 0, so a drop

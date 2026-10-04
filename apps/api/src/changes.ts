@@ -4,8 +4,9 @@
  * A decision does not write (see runtime.ts). It returns a list of these —
  * what should be different afterwards, as plain values — and `commit` is what
  * turns the list into SQL. So there is one place in the API where a request
- * reaches `insert` or `update`, and it is this file: a route is not handed
- * anything it could write with, and a decision has nothing to write to.
+ * reaches `insert`, `update` or `delete`, and it is this file: a route is not
+ * handed anything it could write with, and a decision has nothing to write
+ * to.
  *
  * Being values, the changes can be looked at before they happen. A test can
  * ask a decision what it would do and compare the answer with `toEqual`, and
@@ -18,29 +19,65 @@
 
 import { eq } from "drizzle-orm";
 
-import type { BattleState, OngoingBattle, SaveData } from "@mba/core";
-import { appearances, battles, ownedMonsters, saves, skins } from "@mba/db";
+import type {
+  BattleState,
+  Checked,
+  MapInput,
+  MoveInput,
+  OngoingBattle,
+  SaveData,
+  SpeciesInput,
+} from "@mba/core";
+import {
+  appearances,
+  battles,
+  mapEncounters,
+  mapExits,
+  maps,
+  moves,
+  ownedMonsters,
+  saves,
+  skins,
+  species,
+  speciesMoves,
+} from "@mba/db";
 import type { Tx } from "@mba/db";
 import type { Appearance, Parsed, Skin } from "@mba/sprite";
 
 import type { UserId } from "./auth.js";
+import { RETIRABLE_TABLES } from "./retirement.js";
+import type { Retirable } from "./retirement.js";
 import { skinRow } from "./skins.js";
 
-declare const resolved: unique symbol;
+declare const looked: unique symbol;
 
 /**
  * A value whose references have been looked up: everything it names is in
  * the database, and in use.
  *
  * Like the other marks (`UserId`, `Parsed`, `Checked`) it exists only in the
- * type, and only a cast can put it there. Each such cast is the last line of
- * the decision that did the looking — which is how the third of the three
- * checks (shape, rules, references: docs/04-api-design.md) gets to be
- * something a change can ask for. A change that takes a
+ * type. It is put there by `resolved()` below, and each call to that sits at
+ * the end of the decision that did the looking — which is how the third of
+ * the three checks (shape, rules, references: docs/04-api-design.md) gets to
+ * be something a change can ask for. A change that takes a
  * `Resolved<Checked<SpeciesInput>>` cannot be given a body that was only
  * shape-checked: there is no way to write that down.
  */
-export type Resolved<T> = T & { readonly [resolved]: true };
+export type Resolved<T> = T & { readonly [looked]: true };
+
+/**
+ * Says of a value that what it names has just been looked up.
+ *
+ * A function, and not a cast written out where it is needed, because a cast
+ * to `Resolved<Checked<SpeciesInput>>` would add *both* marks to whatever it
+ * was given — and so let a species that never saw `checkSpecies` through.
+ * This adds the one mark and keeps what was there: hand it a value that was
+ * checked and it gives back one that was checked and resolved; hand it one
+ * that was not, and what comes back still is not.
+ */
+export function resolved<T>(value: T): Resolved<T> {
+  return value as Resolved<T>;
+}
 
 export type Change =
   /**
@@ -59,7 +96,15 @@ export type Change =
   /** A player saved a drawing. It is a new skin: skins are never drawn over. */
   | { kind: "skin_drawn"; id: string; ownerId: UserId; skin: Parsed<Skin> }
   /** A player chose what to wear: the recipe, replacing the one before. */
-  | { kind: "look_chosen"; userId: UserId; appearance: Resolved<Parsed<Appearance>> };
+  | { kind: "look_chosen"; userId: UserId; appearance: Resolved<Parsed<Appearance>> }
+  /** An admin created or replaced a move. A move refers to nothing, so "checked" is all it need be. */
+  | { kind: "move_saved"; id: string; input: Checked<MoveInput> }
+  /** An admin created or replaced a species, together with the moves it knows. */
+  | { kind: "species_saved"; id: string; input: Resolved<Checked<SpeciesInput>> }
+  /** An admin created or replaced a map, together with who turns up on it and its exits. */
+  | { kind: "map_saved"; id: string; input: Resolved<Checked<MapInput>> }
+  /** Something was retired, or brought back. The row stays either way: nothing is ever deleted. */
+  | { kind: "retired_set"; what: Retirable; id: string; retired: boolean };
 
 /**
  * A battle's state as its row holds it. `status` is one field of the state,
@@ -70,6 +115,73 @@ export type Change =
  */
 function stored(state: BattleState) {
   return { status: state.status, state: JSON.stringify(state) };
+}
+
+/**
+ * A species and the moves it knows are one thing to the person editing them:
+ * a species row with last time's moves still attached would be a state nobody
+ * asked for. The moves are replaced, not merged, so unticking one in the form
+ * is how it gets removed.
+ *
+ * (The rows of a link table are the one thing a request ever deletes. They say
+ * "this species knows this move", and nothing refers to them. The species and
+ * the move themselves stay: docs/03-data-model.md §削除しない.)
+ */
+function saveSpecies(tx: Tx, id: string, input: SpeciesInput): void {
+  const row = {
+    name: input.name,
+    maxHp: input.maxHp,
+    attack: input.attack,
+    defense: input.defense,
+    skinId: input.skinId,
+  };
+  tx.insert(species)
+    .values({ id, ...row })
+    .onConflictDoUpdate({ target: species.id, set: row })
+    .run();
+  tx.delete(speciesMoves).where(eq(speciesMoves.speciesId, id)).run();
+  for (const moveId of input.moveIds) {
+    tx.insert(speciesMoves).values({ speciesId: id, moveId }).run();
+  }
+}
+
+/**
+ * A map with its encounters and its exits, for the same reason a species is
+ * saved with its moves: they are edited as one thing. Both lists are replaced,
+ * so leaving a species or an exit out is how it goes away.
+ */
+function saveMap(tx: Tx, id: string, input: MapInput): void {
+  const row = {
+    name: input.name,
+    width: input.width,
+    height: input.height,
+    tiles: JSON.stringify(input.tiles),
+    spawnX: input.spawn.x,
+    spawnY: input.spawn.y,
+  };
+  tx.insert(maps)
+    .values({ id, ...row })
+    .onConflictDoUpdate({ target: maps.id, set: row })
+    .run();
+  tx.delete(mapEncounters).where(eq(mapEncounters.mapId, id)).run();
+  for (const { speciesId, weight } of input.encounters) {
+    tx.insert(mapEncounters).values({ mapId: id, speciesId, weight }).run();
+  }
+  // Only the exits that leave this map. Exits that arrive here belong to
+  // the maps they leave from.
+  tx.delete(mapExits).where(eq(mapExits.mapId, id)).run();
+  for (const { at, to } of input.exits) {
+    tx.insert(mapExits)
+      .values({
+        mapId: id,
+        x: at.x,
+        y: at.y,
+        toMapId: to.mapId,
+        toX: to.position.x,
+        toY: to.position.y,
+      })
+      .run();
+  }
 }
 
 function apply(tx: Tx, change: Change, now: Date): void {
@@ -125,6 +237,26 @@ function apply(tx: Tx, change: Change, now: Date): void {
       tx.insert(appearances)
         .values({ userId: change.userId, ...values })
         .onConflictDoUpdate({ target: appearances.userId, set: values })
+        .run();
+      return;
+    }
+    case "move_saved": {
+      const row = { name: change.input.name, power: change.input.power };
+      tx.insert(moves)
+        .values({ id: change.id, ...row })
+        .onConflictDoUpdate({ target: moves.id, set: row })
+        .run();
+      return;
+    }
+    case "species_saved":
+      return saveSpecies(tx, change.id, change.input);
+    case "map_saved":
+      return saveMap(tx, change.id, change.input);
+    case "retired_set": {
+      const table = RETIRABLE_TABLES[change.what];
+      tx.update(table)
+        .set({ retiredAt: change.retired ? now : null })
+        .where(eq(table.id, change.id))
         .run();
       return;
     }

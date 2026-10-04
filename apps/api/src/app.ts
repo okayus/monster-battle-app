@@ -44,9 +44,9 @@ export interface AppDeps extends Sources {
 export function createApp({ db, migrationsApplied, ...sources }: AppDeps) {
   const app = new Hono();
 
-  // From here down, the routes that have been moved to the new shape get this
-  // and not the database: a way to read, and a way to have a decision carried
-  // out (runtime.ts).
+  // The database stops here. What the routes are given is this: a way to
+  // read, and a way to have a decision carried out (runtime.ts). None of them
+  // holds anything it could write with.
   const runtime = createRuntime(db, sources);
 
   app.get("/api/health", (c) => c.json({ status: "ok", migrationsApplied }));
@@ -61,7 +61,7 @@ export function createApp({ db, migrationsApplied, ...sources }: AppDeps) {
 
   // Everything under this prefix goes through one authorization check, which
   // the admin router attaches to itself.
-  app.route("/api/admin", adminRoutes(db));
+  app.route("/api/admin", adminRoutes(runtime));
 
   // Not built: /api/me. Nothing on screen needs it yet
   // (docs/04-api-design.md §ゲーム API).

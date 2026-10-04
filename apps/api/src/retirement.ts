@@ -5,7 +5,8 @@
  * A retired row stays where it is, with a timestamp on it. What that changes
  * is decided where things are read: lists leave it out, and whatever a player
  * has that points at it falls back (`loadSave`, `loadAppearance`). This file
- * decides only whether the mark may be set or cleared.
+ * decides only whether the mark may be set or cleared. Setting it is
+ * `commit`'s job, like every other write a request makes (changes.ts).
  *
  * The rule is one sentence: **master data that is in use refers only to master
  * data that is in use.** So something still referred to cannot be retired, and
@@ -24,10 +25,12 @@ import { and, asc, eq, inArray, isNotNull, isNull, ne } from "drizzle-orm";
 import { err, ok } from "@mba/core";
 import type { MasterReference, Result, RetireError } from "@mba/core";
 import { mapEncounters, mapExits, maps, moves, skins, species, speciesMoves } from "@mba/db";
-import type { Db } from "@mba/db";
+import type { Read } from "@mba/db";
 
 import { DEFAULT_SKIN_ID } from "./appearance.js";
 import { START_MAP_ID } from "./maps.js";
+import { unchanged } from "./runtime.js";
+import type { Decision, World } from "./runtime.js";
 
 /** What can be retired, by the name it has in the admin API's paths. */
 export const RETIRABLE = ["species", "moves", "maps", "skins"] as const;
@@ -39,12 +42,12 @@ export type Liveness = "missing" | "retired" | "live";
  * The tables behind the four names. They share the three columns this file
  * needs, and nothing else about them matters here.
  */
-const TABLES = { species, moves, maps, skins } as const;
+export const RETIRABLE_TABLES = { species, moves, maps, skins } as const;
 
 /** Whether something exists, and if it does, whether it is still in use. */
-export function livenessOf(db: Db, kind: Retirable, id: string): Liveness {
-  const table = TABLES[kind];
-  const row = db.select({ retiredAt: table.retiredAt }).from(table).where(eq(table.id, id)).get();
+export function livenessOf(read: Read, kind: Retirable, id: string): Liveness {
+  const table = RETIRABLE_TABLES[kind];
+  const row = read.select({ retiredAt: table.retiredAt }).from(table).where(eq(table.id, id)).get();
   if (row === undefined) return "missing";
   return row.retiredAt === null ? "live" : "retired";
 }
@@ -54,8 +57,8 @@ export function livenessOf(db: Db, kind: Retirable, id: string): Liveness {
 // ---------------------------------------------------------------------------
 
 /** Live species that know this move. */
-function speciesKnowing(db: Db, moveId: string): MasterReference[] {
-  return db
+function speciesKnowing(read: Read, moveId: string): MasterReference[] {
+  return read
     .select({ id: species.id, name: species.name })
     .from(speciesMoves)
     .innerJoin(species, eq(speciesMoves.speciesId, species.id))
@@ -66,8 +69,8 @@ function speciesKnowing(db: Db, moveId: string): MasterReference[] {
 }
 
 /** Live species drawn with this skin. */
-function speciesWearing(db: Db, skinId: string): MasterReference[] {
-  return db
+function speciesWearing(read: Read, skinId: string): MasterReference[] {
+  return read
     .select({ id: species.id, name: species.name })
     .from(species)
     .where(and(eq(species.skinId, skinId), isNull(species.retiredAt)))
@@ -77,8 +80,8 @@ function speciesWearing(db: Db, skinId: string): MasterReference[] {
 }
 
 /** Live maps this species turns up on. */
-function mapsListing(db: Db, speciesId: string): MasterReference[] {
-  return db
+function mapsListing(read: Read, speciesId: string): MasterReference[] {
+  return read
     .select({ id: maps.id, name: maps.name })
     .from(mapEncounters)
     .innerJoin(maps, eq(mapEncounters.mapId, maps.id))
@@ -89,8 +92,8 @@ function mapsListing(db: Db, speciesId: string): MasterReference[] {
 }
 
 /** Live maps, other than the map itself, with an exit that leads onto it. */
-function mapsLeadingTo(db: Db, mapId: string): MasterReference[] {
-  const rows = db
+function mapsLeadingTo(read: Read, mapId: string): MasterReference[] {
+  const rows = read
     .select({ id: maps.id, name: maps.name })
     .from(mapExits)
     .innerJoin(maps, eq(mapExits.mapId, maps.id))
@@ -103,8 +106,8 @@ function mapsLeadingTo(db: Db, mapId: string): MasterReference[] {
 }
 
 /** The retired maps a map's exits lead to. */
-function retiredBeyond(db: Db, mapId: string): MasterReference[] {
-  const rows = db
+function retiredBeyond(read: Read, mapId: string): MasterReference[] {
+  const rows = read
     .select({ id: maps.id, name: maps.name })
     .from(mapExits)
     .innerJoin(maps, eq(mapExits.toMapId, maps.id))
@@ -116,15 +119,15 @@ function retiredBeyond(db: Db, mapId: string): MasterReference[] {
 }
 
 /** The retired skin and moves a species refers to. */
-function retiredUnderSpecies(db: Db, speciesId: string): MasterReference[] {
-  const skin = db
+function retiredUnderSpecies(read: Read, speciesId: string): MasterReference[] {
+  const skin = read
     .select({ id: skins.id, name: skins.name })
     .from(species)
     .innerJoin(skins, eq(species.skinId, skins.id))
     .where(and(eq(species.id, speciesId), isNotNull(skins.retiredAt)))
     .all()
     .map((row): MasterReference => ({ kind: "skin", id: row.id, name: row.name }));
-  const known = db
+  const known = read
     .select({ id: moves.id, name: moves.name })
     .from(speciesMoves)
     .innerJoin(moves, eq(speciesMoves.moveId, moves.id))
@@ -136,8 +139,8 @@ function retiredUnderSpecies(db: Db, speciesId: string): MasterReference[] {
 }
 
 /** The retired species a map lists. */
-function retiredOnMap(db: Db, mapId: string): MasterReference[] {
-  return db
+function retiredOnMap(read: Read, mapId: string): MasterReference[] {
+  return read
     .select({ id: species.id, name: species.name })
     .from(mapEncounters)
     .innerJoin(species, eq(mapEncounters.speciesId, species.id))
@@ -147,7 +150,7 @@ function retiredOnMap(db: Db, mapId: string): MasterReference[] {
     .map((row) => ({ kind: "species", id: row.id, name: row.name }));
 }
 
-function whyNotRetire(db: Db, kind: Retirable, id: string): RetireError | undefined {
+function whyNotRetire(read: Read, kind: Retirable, id: string): RetireError | undefined {
   // The two rows everything else falls back to. Retiring one would leave a
   // retired map's players, or a retired skin's wearers, with nowhere to go.
   if (kind === "maps" && id === START_MAP_ID) return { kind: "protected" };
@@ -155,22 +158,22 @@ function whyNotRetire(db: Db, kind: Retirable, id: string): RetireError | undefi
 
   const by =
     kind === "moves"
-      ? speciesKnowing(db, id)
+      ? speciesKnowing(read, id)
       : kind === "skins"
-        ? speciesWearing(db, id)
+        ? speciesWearing(read, id)
         : kind === "species"
-          ? mapsListing(db, id)
+          ? mapsListing(read, id)
           : // What refers to a map is another map, through an exit.
-            mapsLeadingTo(db, id);
+            mapsLeadingTo(read, id);
   return by.length === 0 ? undefined : { kind: "in_use", by };
 }
 
-function whyNotRestore(db: Db, kind: Retirable, id: string): RetireError | undefined {
+function whyNotRestore(read: Read, kind: Retirable, id: string): RetireError | undefined {
   const on =
     kind === "species"
-      ? retiredUnderSpecies(db, id)
+      ? retiredUnderSpecies(read, id)
       : kind === "maps"
-        ? [...retiredOnMap(db, id), ...retiredBeyond(db, id)]
+        ? [...retiredOnMap(read, id), ...retiredBeyond(read, id)]
         : // A move and a skin refer to nothing.
           [];
   return on.length === 0 ? undefined : { kind: "depends_on_retired", on };
@@ -183,28 +186,23 @@ function whyNotRestore(db: Db, kind: Retirable, id: string): RetireError | undef
  *
  * Asking for the state it is already in changes nothing — not even the time it
  * was retired at — and is not an error: the request says what should be true,
- * and it is.
+ * and it is. That shows in what this returns: no changes. The same request
+ * sent five times decides something once, and then nothing four times.
  */
 export function setRetired(
-  db: Db,
+  { read }: Pick<World, "read">,
   kind: Retirable,
   id: string,
   retired: boolean,
-  now: Date,
-): Result<void, RetireError | { kind: "not_found" }> {
-  const liveness = livenessOf(db, kind, id);
+): Result<Decision<void>, RetireError | { kind: "not_found" }> {
+  const liveness = livenessOf(read, kind, id);
   if (liveness === "missing") return err({ kind: "not_found" });
-  if ((liveness === "retired") === retired) return ok(undefined);
+  if ((liveness === "retired") === retired) return ok(unchanged(undefined));
 
-  const refusal = retired ? whyNotRetire(db, kind, id) : whyNotRestore(db, kind, id);
+  const refusal = retired ? whyNotRetire(read, kind, id) : whyNotRestore(read, kind, id);
   if (refusal !== undefined) return err(refusal);
 
-  const table = TABLES[kind];
-  db.update(table)
-    .set({ retiredAt: retired ? now : null })
-    .where(eq(table.id, id))
-    .run();
-  return ok(undefined);
+  return ok({ answer: undefined, changes: [{ kind: "retired_set", what: kind, id, retired }] });
 }
 
 /**
@@ -216,13 +214,13 @@ export function setRetired(
  * is pointed at.
  */
 export function firstUnusable(
-  db: Db,
+  read: Read,
   kind: Retirable,
   ids: readonly string[],
 ): { id: string; why: "missing" | "retired" } | undefined {
   if (ids.length === 0) return undefined;
-  const table = TABLES[kind];
-  const rows = db
+  const table = RETIRABLE_TABLES[kind];
+  const rows = read
     .select({ id: table.id, retiredAt: table.retiredAt })
     .from(table)
     .where(inArray(table.id, [...ids]))

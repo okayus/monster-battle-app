@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 
+import { MAP_LIMITS } from "@mba/core";
 import type {
   AdminMap,
   BattleView,
@@ -352,6 +353,21 @@ describe("exits, as the admin API stores them", () => {
         status: 400,
         error: { kind: "duplicate_exit", at: { x: 0, y: 0 } },
       });
+    });
+
+    it("more of them than a map may have", async () => {
+      const { app, db } = setup();
+      const far = await createMap(app);
+      // One too many, and counted before any of them is looked at: where
+      // they are and where they lead never comes into it.
+      const exits = Array.from({ length: MAP_LIMITS.maxExits + 1 }, () =>
+        exit({ x: 0, y: 0 }, far, { x: 0, y: 0 }),
+      );
+      expect(await refusal(admin(app, "POST", "/maps", pond({ exits })))).toEqual({
+        status: 400,
+        error: { kind: "too_many_exits", got: MAP_LIMITS.maxExits + 1, max: MAP_LIMITS.maxExits },
+      });
+      expect(db.select().from(mapExits).all()).toEqual([]);
     });
 
     it("to a map that does not exist", async () => {

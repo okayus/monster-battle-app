@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { err, ok } from "@mba/core";
-import type { FinishedBattle, OngoingBattle, Result, SaveData } from "@mba/core";
+import type {
+  Checked,
+  FinishedBattle,
+  MoveInput,
+  OngoingBattle,
+  Result,
+  SaveData,
+  SpeciesInput,
+} from "@mba/core";
 import { saves } from "@mba/db";
 import type { Appearance, Parsed, Skin } from "@mba/sprite";
 
 import { LOCAL_USER_ID } from "./auth.js";
 import type { UserId } from "./auth.js";
+import { resolved } from "./changes.js";
 import type { Change } from "./changes.js";
 import { START_MAP_ID } from "./maps.js";
 import { createRuntime, unchanged } from "./runtime.js";
@@ -159,6 +168,7 @@ describe("what the types refuse", () => {
     over: FinishedBattle,
     drawn: { byHand: Skin; parsed: Parsed<Skin> },
     recipe: Parsed<Appearance>,
+    master: { move: MoveInput; species: Checked<SpeciesInput>; unchecked: SpeciesInput },
   ): void => {
     // @ts-expect-error — a route is handed `read`, and there is nothing on it to write with
     runtime.read.insert(saves);
@@ -192,7 +202,16 @@ describe("what the types refuse", () => {
     // @ts-expect-error — a recipe that was parsed has still to have what it names looked up
     const unresolved: Change = { kind: "look_chosen", userId, appearance: recipe };
 
-    return void [unknown, begun, ended, unparsed, unresolved];
+    // @ts-expect-error — a move that has the shape of one has still to pass the rules
+    const unchecked: Change = { kind: "move_saved", id: "a-move", input: master.move };
+    // @ts-expect-error — a species that passed them has still to have what it names looked up
+    const dangling: Change = { kind: "species_saved", id: "a-kind", input: master.species };
+
+    const kept: Change = { kind: "species_saved", id: "a-kind", input: resolved(master.species) };
+    // @ts-expect-error — and looking things up does not make up for a check that was skipped
+    const smuggled: Change = { kind: "species_saved", id: "k", input: resolved(master.unchecked) };
+
+    return void [unknown, begun, ended, unparsed, unresolved, unchecked, dangling, kept, smuggled];
   };
 
   it("is checked by tsc, where a directive with nothing to suppress is an error", () => {
