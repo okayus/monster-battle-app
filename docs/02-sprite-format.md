@@ -105,15 +105,16 @@ Frame {
 `packages/sprite/src/index.ts`。どちらも純粋関数なので単体テストで完結する。特に `toRenderable` は
 **「結合した結果を展開し直すと元のドットと 1 ドットも違わない」**という性質でテストしてある。
 
-- `parseSkin(input: unknown): Result<Skin, SkinError>`
+- `parseSkin(input: unknown): Result<Parsed<Skin>, SkinError>`
   唯一の信頼境界。上限・パターン・セル数の合計がキャンバスサイズの 2 乗と一致するか、まで検査する。
+  返す値には、ここを通ったという型だけのしるし（`Parsed`）が付く。
 - `toRenderable(skin: Skin): RenderableSkin`
   ランレングスを展開し、同色の隣接セルを矩形に結合する。
 - `expandFrame` / `packFrame`
   ランレングスとセル列の相互変換。エディタが読み書きする形はセル列なので、この 2 つが編集画面側の入口になる。
 - `frameAt(frames, elapsedMs)`
   その時刻に映っているコマの番号。コマごとの `durationMs` を使うのはここだけ。時計は持たない。
-- `parseAppearance(input: unknown): Result<Appearance, AppearanceError>`
+- `parseAppearance(input: unknown): Result<Parsed<Appearance>, AppearanceError>`
   見た目のレシピの信頼境界（下の「見た目のレシピ」）。
 - `composeAppearance(appearance, skins)` / `coloursOf(skin)`
   レシピに従ってスキンを 1 体に組む。組んだものが実際に塗られている色を挙げる。
@@ -127,6 +128,12 @@ Frame {
 **戻り値は組み直す。コピーしない。** `parseSkin` は入力をスプレッドやキャストで通さず、
 検査したフィールドだけを 1 つずつ拾って新しいオブジェクトを作る。こうしておくと、
 入力に紛れ込んだ未知のプロパティが保存データまで到達する経路が存在しない。
+
+**通ったことは、型に残る。** `Parsed<Skin>` は、実行時にはただの `Skin`。しるしは型にだけあり、付けられるのは
+`parseSkin()` の最後の行のキャストだけ。スキンを保存する側（API の `skinRow()`）が `Parsed<Skin>` を求めるので、
+リクエストのボディも、手で組んだ `Skin` も、保存には渡せない。「ここを通った後は下流で再検査しない」は、
+通っていない値が下流に届かないから成り立つ。エディタが送る前の `Skin` には、しるしは無い。あれは
+これから検査される側の値。
 
 **上限を 2 つ足した**（`SKIN_SPEC`）。`name` と `durationMs` は `fill` にも
 CSS 変数名にも流れないので注入面ではない。それでも、境界に立つ関数が
