@@ -11,57 +11,54 @@
  * Nothing here is a defence. The server validates every recipe again.
  */
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
-import type { WearableSkin } from "@mba/core";
+import { ok } from "@mba/core";
+import type { Result, WearableSkin } from "@mba/core";
 import { PART_SLOTS, coloursOf, composeAppearance, skinsNamedBy } from "@mba/sprite";
 import type { Appearance, RenderableSkin } from "@mba/sprite";
 
 import { fetchAppearance, fetchSkins, putAppearance } from "../api.js";
 import type { ApiError } from "../api.js";
 import { PART_NAMES } from "../editor/names.js";
+import { Loaded } from "../loaded.js";
 import { Playing } from "../Playing.js";
 import { hrefs } from "../route.js";
 import { fetchDrawings } from "./load.js";
 import { colourWorn, dye, takePart, trimmed, undye, wear } from "./model.js";
 
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "failed"; error: ApiError }
-  | { kind: "ready"; skins: WearableSkin[]; appearance: Appearance };
+/** What there is to wear, and what is worn now. */
+interface Closet {
+  skins: WearableSkin[];
+  appearance: Appearance;
+}
 
-/** What there is to wear, and what is worn now. Neither waits for the other. */
-async function load(): Promise<LoadState> {
+/** Neither request waits for the other. */
+async function load(): Promise<Result<Closet, ApiError>> {
   const [skins, appearance] = await Promise.all([fetchSkins(), fetchAppearance()]);
-  if (!skins.ok) return { kind: "failed", error: skins.error };
-  if (!appearance.ok) return { kind: "failed", error: appearance.error };
-  return { kind: "ready", skins: skins.value, appearance: appearance.value };
+  if (!skins.ok) return skins;
+  if (!appearance.ok) return appearance;
+  return ok({ skins: skins.value, appearance: appearance.value });
 }
 
 export function LookScreen() {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [loading] = useState(load);
 
-  useEffect(() => {
-    let cancelled = false;
-    void load().then((next) => {
-      // The requests can outlive the component (and StrictMode's first mount).
-      if (!cancelled) setState(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (state.kind === "loading") return <p>読み込み中…</p>;
-  if (state.kind === "failed") {
-    return (
-      <section aria-label="きがえ">
-        <p role="alert">きがえを読み込めなかった（{state.error.kind}）</p>
-      </section>
-    );
-  }
-  return <Wardrobe skins={state.skins} worn={state.appearance} />;
+  return (
+    <Suspense fallback={<p>読み込み中…</p>}>
+      <Loaded
+        from={loading}
+        failed={(error) => (
+          <section aria-label="きがえ">
+            <p role="alert">きがえを読み込めなかった（{error.kind}）</p>
+          </section>
+        )}
+      >
+        {({ skins, appearance }) => <Wardrobe skins={skins} worn={appearance} />}
+      </Loaded>
+    </Suspense>
+  );
 }
 
 // ---------------------------------------------------------------------------
