@@ -7,7 +7,7 @@
  * with `checkMap`, and that check is the one that counts.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties, PointerEvent } from "react";
 
 import { MAP_LIMITS, TILE_KINDS, err, ok } from "@mba/core";
@@ -27,18 +27,15 @@ import {
   toggleExit,
 } from "./forms.js";
 import type { MapForm } from "./forms.js";
+import { Loaded, couldNotLoad } from "./loaded.js";
 import { offered, withMark } from "./retire.js";
 import { RetireControl } from "./RetireControl.js";
 
-interface Loaded {
+/** The two lists the form is made of. */
+interface Lists {
   maps: AdminMap[];
   species: AdminSpecies[];
 }
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "failed"; error: ApiError }
-  | { kind: "ready"; data: Loaded };
 
 type SaveState =
   | { kind: "idle" }
@@ -49,7 +46,7 @@ type SaveState =
 /** What a click on the grid does: paint a kind of tile, move the spawn, or put an exit down. */
 type Brush = TileKind | "spawn" | "exit";
 
-async function load(): Promise<Result<Loaded, ApiError>> {
+async function load(): Promise<Result<Lists, ApiError>> {
   const [maps, species] = await Promise.all([fetchMaps(), fetchSpecies()]);
   if (!maps.ok) return err(maps.error);
   if (!species.ok) return err(species.error);
@@ -57,32 +54,13 @@ async function load(): Promise<Result<Loaded, ApiError>> {
 }
 
 export function MapsScreen() {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [loading] = useState(load);
 
-  useEffect(() => {
-    let cancelled = false;
-    void load().then((result) => {
-      if (cancelled) return;
-      setState(
-        result.ok ? { kind: "ready", data: result.value } : { kind: "failed", error: result.error },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (state.kind === "loading") return <p>読み込み中…</p>;
-  if (state.kind === "failed") {
-    return (
-      <p role="alert">
-        {state.error.kind === "forbidden"
-          ? "管理者ではないので、この画面は使えない。"
-          : `マップを読み込めなかった（${describeError(state.error)}）`}
-      </p>
-    );
-  }
-  return <MapEditor initial={state.data} />;
+  return (
+    <Loaded from={loading} waiting={<p>読み込み中…</p>} failed={couldNotLoad("マップ")}>
+      {(lists) => <MapEditor initial={lists} />}
+    </Loaded>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -154,7 +132,7 @@ function brushStyle(selected: boolean, colour: string): CSSProperties {
   };
 }
 
-function MapEditor({ initial }: { initial: Loaded }) {
+function MapEditor({ initial }: { initial: Lists }) {
   const [maps, setMaps] = useState(initial.maps);
   const { species } = initial;
 

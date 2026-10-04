@@ -7,9 +7,10 @@
  * and must not ship its authoring code to players. See docs/01-architecture.md.
  */
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
+import { useSettled } from "./loaded.js";
 import { MapsScreen } from "./MapsScreen.js";
 import { MovesScreen } from "./MovesScreen.js";
 import { hrefs, parseRoute } from "./route.js";
@@ -28,6 +29,18 @@ function useRoute(): Route {
   return parseRoute(hash);
 }
 
+/**
+ * Proves the Vite dev server's /api proxy reaches the Hono process. Like the
+ * calls in api.ts it never rejects: not reaching the API is something to
+ * show, so it is a value.
+ */
+function checkHealth(): Promise<string> {
+  return fetch("/api/health")
+    .then((r) => r.json())
+    .then((body: { status: string }) => body.status)
+    .catch((e: unknown) => `unreachable: ${String(e)}`);
+}
+
 const page: CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   padding: "2rem",
@@ -37,15 +50,9 @@ const page: CSSProperties = {
 const nav: CSSProperties = { display: "flex", gap: "1.5rem" };
 
 export function App() {
-  const [health, setHealth] = useState<string>("...");
+  const [checking] = useState(checkHealth);
+  const health = useSettled(checking) ?? "...";
   const route = useRoute();
-
-  useEffect(() => {
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((body: { status: string }) => setHealth(body.status))
-      .catch((e: unknown) => setHealth(`unreachable: ${String(e)}`));
-  }, []);
 
   return (
     <main style={page}>

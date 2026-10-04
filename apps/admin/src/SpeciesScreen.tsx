@@ -6,7 +6,7 @@
  * that answer is the one that counts.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import { SPECIES_LIMITS, err, ok } from "@mba/core";
@@ -23,20 +23,17 @@ import {
 import type { ApiError } from "./api.js";
 import { blankSpeciesForm, speciesFormOf, toSpeciesInput, toggleMove } from "./forms.js";
 import type { SpeciesForm } from "./forms.js";
+import { Loaded, couldNotLoad } from "./loaded.js";
 import { offered, withMark } from "./retire.js";
 import { RetireControl } from "./RetireControl.js";
 import { SkinPreview } from "./SkinPreview.js";
 
-interface Loaded {
+/** The three lists the form is made of. */
+interface Lists {
   species: AdminSpecies[];
   moves: AdminMove[];
   skins: SkinSummary[];
 }
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "failed"; error: ApiError }
-  | { kind: "ready"; data: Loaded };
 
 type SaveState =
   | { kind: "idle" }
@@ -45,7 +42,7 @@ type SaveState =
   | { kind: "failed"; error: ApiError };
 
 /** The form needs all three lists, so it waits for all three. */
-async function load(): Promise<Result<Loaded, ApiError>> {
+async function load(): Promise<Result<Lists, ApiError>> {
   const [species, moves, skins] = await Promise.all([fetchSpecies(), fetchMoves(), fetchSkins()]);
   if (!species.ok) return err(species.error);
   if (!moves.ok) return err(moves.error);
@@ -54,32 +51,13 @@ async function load(): Promise<Result<Loaded, ApiError>> {
 }
 
 export function SpeciesScreen() {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [loading] = useState(load);
 
-  useEffect(() => {
-    let cancelled = false;
-    void load().then((result) => {
-      if (cancelled) return;
-      setState(
-        result.ok ? { kind: "ready", data: result.value } : { kind: "failed", error: result.error },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (state.kind === "loading") return <p>読み込み中…</p>;
-  if (state.kind === "failed") {
-    return (
-      <p role="alert">
-        {state.error.kind === "forbidden"
-          ? "管理者ではないので、この画面は使えない。"
-          : `種族を読み込めなかった（${describeError(state.error)}）`}
-      </p>
-    );
-  }
-  return <SpeciesEditor initial={state.data} />;
+  return (
+    <Loaded from={loading} waiting={<p>読み込み中…</p>} failed={couldNotLoad("種族")}>
+      {(lists) => <SpeciesEditor initial={lists} />}
+    </Loaded>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +86,7 @@ function item(retired: boolean): CSSProperties {
 const fields: CSSProperties = { display: "grid", gap: "0.75rem", justifyItems: "start" };
 const fieldRow: CSSProperties = { display: "flex", gap: "1rem", flexWrap: "wrap" };
 
-function SpeciesEditor({ initial }: { initial: Loaded }) {
+function SpeciesEditor({ initial }: { initial: Lists }) {
   const [species, setSpecies] = useState(initial.species);
   const { moves, skins } = initial;
 

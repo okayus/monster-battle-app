@@ -7,21 +7,16 @@
  * drawing a player made.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { SkinSummary } from "@mba/core";
 
-import { describeError, fetchSkins } from "./api.js";
-import type { ApiError } from "./api.js";
+import { fetchSkins } from "./api.js";
+import { Loaded, couldNotLoad, remember } from "./loaded.js";
 import { withMark } from "./retire.js";
 import { RetireControl } from "./RetireControl.js";
 import { SkinPreview } from "./SkinPreview.js";
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "failed"; error: ApiError }
-  | { kind: "ready"; skins: SkinSummary[] };
 
 const list: CSSProperties = {
   listStyle: "none",
@@ -36,41 +31,25 @@ function item(retired: boolean): CSSProperties {
 }
 
 export function SkinsScreen() {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [listing, setListing] = useState(fetchSkins);
 
-  const load = async () => {
-    const result = await fetchSkins();
-    setState(
-      result.ok ? { kind: "ready", skins: result.value } : { kind: "failed", error: result.error },
-    );
+  // After a retire or a restore the list is asked for again: it is the
+  // server's, in the server's order. The new one takes the screen only once
+  // it is in, so the list that is up stays up until then.
+  const refresh = async () => {
+    const next = remember(fetchSkins());
+    await next;
+    setListing(next);
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchSkins().then((result) => {
-      if (cancelled) return;
-      setState(
-        result.ok
-          ? { kind: "ready", skins: result.value }
-          : { kind: "failed", error: result.error },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  return (
+    <Loaded from={listing} waiting={<p>読み込み中…</p>} failed={couldNotLoad("スキン")}>
+      {(skins) => <SkinList skins={skins} onChanged={refresh} />}
+    </Loaded>
+  );
+}
 
-  if (state.kind === "loading") return <p>読み込み中…</p>;
-  if (state.kind === "failed") {
-    return (
-      <p role="alert">
-        {state.error.kind === "forbidden"
-          ? "管理者ではないので、この画面は使えない。"
-          : `スキンを読み込めなかった（${describeError(state.error)}）`}
-      </p>
-    );
-  }
-
+function SkinList({ skins, onChanged }: { skins: SkinSummary[]; onChanged: () => Promise<void> }) {
   return (
     <section aria-label="スキン">
       <h2>スキン</h2>
@@ -81,7 +60,7 @@ export function SkinsScreen() {
         戻せば、元の見た目に戻る。
       </p>
       <ul style={list} aria-label="スキンの一覧">
-        {state.skins.map((skin) => (
+        {skins.map((skin) => (
           <li key={skin.id} style={item(skin.retired)}>
             <SkinPreview skinId={skin.id} size="4rem" />
             <div>
@@ -92,7 +71,7 @@ export function SkinsScreen() {
                 kind="skins"
                 id={skin.id}
                 retired={skin.retired}
-                onChanged={load}
+                onChanged={onChanged}
                 quiet
               />
             </div>

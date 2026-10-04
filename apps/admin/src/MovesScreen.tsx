@@ -6,7 +6,7 @@
  * that answer is the one that counts.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import { MOVE_LIMITS } from "@mba/core";
@@ -16,13 +16,9 @@ import { createMove, describeError, fetchMoves, updateMove } from "./api.js";
 import type { ApiError } from "./api.js";
 import { blankMoveForm, moveFormOf, toMoveInput } from "./forms.js";
 import type { MoveForm } from "./forms.js";
+import { Loaded, couldNotLoad } from "./loaded.js";
 import { withMark } from "./retire.js";
 import { RetireControl } from "./RetireControl.js";
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "failed"; error: ApiError }
-  | { kind: "ready"; moves: AdminMove[] };
 
 type SaveState =
   | { kind: "idle" }
@@ -31,34 +27,13 @@ type SaveState =
   | { kind: "failed"; error: ApiError };
 
 export function MovesScreen() {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [loading] = useState(fetchMoves);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchMoves().then((result) => {
-      if (cancelled) return;
-      setState(
-        result.ok
-          ? { kind: "ready", moves: result.value }
-          : { kind: "failed", error: result.error },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (state.kind === "loading") return <p>読み込み中…</p>;
-  if (state.kind === "failed") {
-    return (
-      <p role="alert">
-        {state.error.kind === "forbidden"
-          ? "管理者ではないので、この画面は使えない。"
-          : `技を読み込めなかった（${describeError(state.error)}）`}
-      </p>
-    );
-  }
-  return <MoveEditor initial={state.moves} />;
+  return (
+    <Loaded from={loading} waiting={<p>読み込み中…</p>} failed={couldNotLoad("技")}>
+      {(moves) => <MoveEditor initial={moves} />}
+    </Loaded>
+  );
 }
 
 // ---------------------------------------------------------------------------
