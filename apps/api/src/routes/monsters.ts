@@ -17,18 +17,18 @@ import { Hono } from "hono";
 
 import { viewMonster } from "@mba/core";
 import type { MonsterView } from "@mba/core";
-import type { Db } from "@mba/db";
+import type { Read } from "@mba/db";
 
 import { getUserId } from "../auth.js";
 import { ongoingBattleOf } from "../battles.js";
 import { monstersOf } from "../monsters.js";
 
-export function monsterRoutes(db: Db) {
+export function monsterRoutes(read: Read) {
   const routes = new Hono();
 
   routes.get("/", (c) => {
-    const owned: MonsterView[] = monstersOf(db, getUserId(c)).map((monster) =>
-      viewMonster(monster, ongoingBattleOf(db, monster.id)?.id ?? null),
+    const owned: MonsterView[] = monstersOf(read, getUserId(c)).map((monster) =>
+      viewMonster(monster, ongoingBattleOf(read, monster.id)?.id ?? null),
     );
     return c.json(owned);
   });

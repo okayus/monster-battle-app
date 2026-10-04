@@ -16,8 +16,10 @@
  * if it is missing" is a different rule from any of these (seed.ts).
  */
 
-import type { SaveData } from "@mba/core";
-import { saves } from "@mba/db";
+import { eq } from "drizzle-orm";
+
+import type { BattleState, OngoingBattle, SaveData } from "@mba/core";
+import { battles, ownedMonsters, saves } from "@mba/db";
 import type { Tx } from "@mba/db";
 
 import type { UserId } from "./auth.js";
@@ -29,25 +31,65 @@ export type Change =
    * checked the walk, an exit was read off the map, a lost battle sends the
    * player to the starting point.
    */
-  { kind: "player_placed"; userId: UserId; at: SaveData };
+  | { kind: "player_placed"; userId: UserId; at: SaveData }
+  /** A battle has begun. It can only begin as one that is still going on. */
+  | { kind: "battle_begun"; id: string; userId: UserId; monsterId: string; state: OngoingBattle }
+  /** A turn was played: the battle is in this state now, at whatever stage that is. */
+  | { kind: "battle_advanced"; id: string; state: BattleState }
+  /** What a finished battle left its monster with: the two numbers that are stored. */
+  | { kind: "monster_settled"; id: string; exp: number; damage: number };
 
-/** One row per player, so this replaces. */
-function placePlayer(tx: Tx, userId: UserId, at: SaveData, now: Date): void {
-  const values = { mapId: at.mapId, x: at.position.x, y: at.position.y, updatedAt: now };
-  tx.insert(saves)
-    .values({ userId, ...values })
-    .onConflictDoUpdate({ target: saves.userId, set: values })
-    .run();
+/**
+ * A battle's state as its row holds it. `status` is one field of the state,
+ * copied out into a column so that "the battles that are still going on" is
+ * something SQL can ask (docs/03-data-model.md). Both are written from the
+ * same value here, so the copy cannot come to disagree with what it was
+ * copied from.
+ */
+function stored(state: BattleState) {
+  return { status: state.status, state: JSON.stringify(state) };
 }
 
 function apply(tx: Tx, change: Change, now: Date): void {
   switch (change.kind) {
-    case "player_placed":
-      return placePlayer(tx, change.userId, change.at, now);
+    case "player_placed": {
+      // One row per player, so this replaces.
+      const { mapId, position } = change.at;
+      const values = { mapId, x: position.x, y: position.y, updatedAt: now };
+      tx.insert(saves)
+        .values({ userId: change.userId, ...values })
+        .onConflictDoUpdate({ target: saves.userId, set: values })
+        .run();
+      return;
+    }
+    case "battle_begun":
+      tx.insert(battles)
+        .values({
+          id: change.id,
+          userId: change.userId,
+          monsterId: change.monsterId,
+          ...stored(change.state),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+      return;
+    case "battle_advanced":
+      tx.update(battles)
+        .set({ ...stored(change.state), updatedAt: now })
+        .where(eq(battles.id, change.id))
+        .run();
+      return;
+    case "monster_settled":
+      tx.update(ownedMonsters)
+        .set({ exp: change.exp, damage: change.damage })
+        .where(eq(ownedMonsters.id, change.id))
+        .run();
+      return;
     default:
       // Every kind is written above. A kind added to `Change` and not given
       // its SQL stops compiling on this line.
-      return change.kind satisfies never;
+      return change satisfies never;
   }
 }
 

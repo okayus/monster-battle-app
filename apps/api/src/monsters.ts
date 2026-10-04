@@ -15,18 +15,20 @@ import type {
   Weighted,
 } from "@mba/core";
 import { mapEncounters, moves, ownedMonsters, species, speciesMoves } from "@mba/db";
-import type { Db } from "@mba/db";
+import type { Db, Read } from "@mba/db";
+
+import type { UserId } from "./auth.js";
 
 /**
  * A species, for a battle. Retired or not: retiring a species stops it from
  * being offered, it does not take away the monster a player already has. That
  * monster looks its species up here, and goes on fighting.
  */
-export function findSpecies(db: Db, id: string): Species | undefined {
-  const row = db.select().from(species).where(eq(species.id, id)).get();
+export function findSpecies(read: Read, id: string): Species | undefined {
+  const row = read.select().from(species).where(eq(species.id, id)).get();
   if (row === undefined) return undefined;
 
-  const known = db
+  const known = read
     .select({ id: moves.id, name: moves.name, power: moves.power })
     .from(speciesMoves)
     .innerJoin(moves, eq(speciesMoves.moveId, moves.id))
@@ -48,8 +50,8 @@ export function findSpecies(db: Db, id: string): Species | undefined {
 }
 
 /** What can be met on a map, with the weights the pick is made by. */
-export function encountersOn(db: Db, mapId: string): Weighted<Species>[] {
-  const rows = db
+export function encountersOn(read: Read, mapId: string): Weighted<Species>[] {
+  const rows = read
     .select()
     .from(mapEncounters)
     .where(eq(mapEncounters.mapId, mapId))
@@ -59,7 +61,7 @@ export function encountersOn(db: Db, mapId: string): Weighted<Species>[] {
 
   const entries: Weighted<Species>[] = [];
   for (const row of rows) {
-    const value = findSpecies(db, row.speciesId);
+    const value = findSpecies(read, row.speciesId);
     if (value !== undefined) entries.push({ value, weight: row.weight });
   }
   return entries;
@@ -73,8 +75,8 @@ export function encountersOn(db: Db, mapId: string): Weighted<Species>[] {
  * as they are. What they amount to — a level, a health — is not decided here
  * but by the rules in `@mba/core`, each time someone needs to know.
  */
-export function monstersOf(db: Db, userId: string): OwnedMonster[] {
-  const rows = db
+export function monstersOf(read: Read, userId: UserId): OwnedMonster[] {
+  const rows = read
     .select()
     .from(ownedMonsters)
     .where(eq(ownedMonsters.userId, userId))
@@ -85,7 +87,7 @@ export function monstersOf(db: Db, userId: string): OwnedMonster[] {
 
   const owned: OwnedMonster[] = [];
   for (const row of rows) {
-    const kind = findSpecies(db, row.speciesId);
+    const kind = findSpecies(read, row.speciesId);
     if (kind === undefined) continue;
     owned.push({
       id: row.id,
@@ -99,8 +101,8 @@ export function monstersOf(db: Db, userId: string): OwnedMonster[] {
 }
 
 /** The monster a player sends into battle: the first one they got. */
-export function leadMonsterOf(db: Db, userId: string): OwnedMonster | undefined {
-  return monstersOf(db, userId)[0];
+export function leadMonsterOf(read: Read, userId: UserId): OwnedMonster | undefined {
+  return monstersOf(read, userId)[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -108,10 +110,10 @@ export function leadMonsterOf(db: Db, userId: string): OwnedMonster | undefined 
 // ---------------------------------------------------------------------------
 
 /** A species with the mark an admin needs to see: whether it has been retired. */
-export function findAdminSpecies(db: Db, id: string): AdminSpecies | undefined {
-  const found = findSpecies(db, id);
+export function findAdminSpecies(read: Read, id: string): AdminSpecies | undefined {
+  const found = findSpecies(read, id);
   if (found === undefined) return undefined;
-  const row = db
+  const row = read
     .select({ retiredAt: species.retiredAt })
     .from(species)
     .where(eq(species.id, id))
@@ -120,8 +122,8 @@ export function findAdminSpecies(db: Db, id: string): AdminSpecies | undefined {
 }
 
 /** Every species, retired or not. */
-export function listSpecies(db: Db): AdminSpecies[] {
-  const ids = db
+export function listSpecies(read: Read): AdminSpecies[] {
+  const ids = read
     .select({ id: species.id })
     .from(species)
     .orderBy(asc(species.name), asc(species.id))
@@ -129,15 +131,15 @@ export function listSpecies(db: Db): AdminSpecies[] {
 
   const all: AdminSpecies[] = [];
   for (const { id } of ids) {
-    const found = findAdminSpecies(db, id);
+    const found = findAdminSpecies(read, id);
     if (found !== undefined) all.push(found);
   }
   return all;
 }
 
 /** Every move, retired or not. */
-export function listMoves(db: Db): AdminMove[] {
-  return db
+export function listMoves(read: Read): AdminMove[] {
+  return read
     .select({ id: moves.id, name: moves.name, power: moves.power, retiredAt: moves.retiredAt })
     .from(moves)
     .orderBy(asc(moves.name), asc(moves.id))
@@ -150,8 +152,8 @@ export function listMoves(db: Db): AdminMove[] {
     }));
 }
 
-export function findMove(db: Db, id: string): AdminMove | undefined {
-  const row = db.select().from(moves).where(eq(moves.id, id)).get();
+export function findMove(read: Read, id: string): AdminMove | undefined {
+  const row = read.select().from(moves).where(eq(moves.id, id)).get();
   if (row === undefined) return undefined;
   return { id: row.id, name: row.name, power: row.power, retired: row.retiredAt !== null };
 }

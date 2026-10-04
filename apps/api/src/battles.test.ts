@@ -122,6 +122,25 @@ describe("POST /api/battles", () => {
     expect(res.headers.get("Location")).toBe(`/api/battles/${battle.id}`);
   });
 
+  it("is given its id by the app, not by the request and not by this route", async () => {
+    // The id generator is one of the things the app is handed (index.ts names
+    // the real one), so a test can say what the next id will be.
+    const game = setup({ random: rolls(MEETS_DROP), newId: () => "the-next-battle" });
+    await standOnGrass(game.app);
+
+    const res = await game.app.request("/api/battles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: "chosen-by-the-client" }),
+    });
+    expect(res.status).toBe(201);
+    expect(((await res.json()) as BattleView).id).toBe("the-next-battle");
+    expect(res.headers.get("Location")).toBe("/api/battles/the-next-battle");
+    expect(game.db.select({ id: battles.id }).from(battles).all()).toEqual([
+      { id: "the-next-battle" },
+    ]);
+  });
+
   it.each([
     ["a low roll", MEETS_DROP, "drop"],
     ["a middling roll", MEETS_MOSS, "moss"],

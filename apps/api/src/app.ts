@@ -56,8 +56,8 @@ export function createApp({ db, migrationsApplied, ...sources }: AppDeps) {
   app.route("/api/save", saveRoutes(runtime));
   app.route("/api/travel", travelRoutes(runtime));
   app.route("/api/appearance", appearanceRoutes(db));
-  app.route("/api/monsters", monsterRoutes(db));
-  app.route("/api/battles", battleRoutes(db, sources.random));
+  app.route("/api/monsters", monsterRoutes(runtime.read));
+  app.route("/api/battles", battleRoutes(runtime));
 
   // Everything under this prefix goes through one authorization check, which
   // the admin router attaches to itself.

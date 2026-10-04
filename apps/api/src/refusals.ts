@@ -16,6 +16,7 @@
 
 import type { Context } from "hono";
 
+import type { BeginError, TurnError } from "./battles.js";
 import type { BodyError } from "./http.js";
 import type { SaveError, TravelError } from "./saves.js";
 
@@ -24,7 +25,9 @@ export type Refusal =
   | { kind: "body_too_large"; max: number }
   | { kind: "not_found" }
   | SaveError
-  | TravelError;
+  | TravelError
+  | BeginError
+  | TurnError;
 
 /**
  * 400 the request is wrong, 403 the caller may not, 404 there is no such
@@ -50,6 +53,13 @@ const STATUS = {
   // from happening.
   no_start_map: 500,
   broken_exit: 500,
+
+  // Battles.
+  no_encounters_here: 400,
+  no_monster: 400,
+  stale_turn: 400,
+  battle_over: 400,
+  unknown_move: 400,
 } as const satisfies Record<Refusal["kind"], Status>;
 
 /** Answers with an error: the value as it is, under the status its kind has. */

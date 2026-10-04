@@ -12,6 +12,8 @@ import type {
 import { battles, ownedMonsters, saves, species } from "@mba/db";
 
 import { LOCAL_USER_ID } from "./auth.js";
+import { takeTurn } from "./battles.js";
+import type { Change } from "./changes.js";
 import { START_MAP_ID } from "./maps.js";
 import { createMap, firstTile, rolls, setup, starter, visit } from "./testing.js";
 import type { TestApp } from "./testing.js";
@@ -572,5 +574,70 @@ describe("a battle from before monsters kept anything", () => {
     expect(stored(db)).toEqual({ exp: 0, damage: 2 });
     expect(await saved(app)).toEqual(GRASS);
     expect(db.select().from(saves).all()).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The same turns, asked of the decision itself. `takeTurn` does not write: it
+// says what the turn would change, as a list, and `perform` writes the list.
+// So the three ways a turn can go can be read off as three lists.
+// ---------------------------------------------------------------------------
+
+describe("what a turn decides, before any of it is written", () => {
+  function decide(db: Game["db"], battle: BattleView, roll: number, moveId = "bite") {
+    const decided = takeTurn({ read: db, roll: () => roll }, LOCAL_USER_ID, battle.id, {
+      moveId,
+      turn: battle.turn,
+    });
+    if (!decided.ok) throw new Error(`the turn was refused: ${decided.error.kind}`);
+    return decided.value;
+  }
+
+  const kindsOf = (changes: readonly Change[]) => changes.map((change) => change.kind);
+
+  it("is the battle's next state and nothing else, while the battle goes on", async () => {
+    const { app, db } = await onGrass(...WIN);
+    const { answer, changes } = decide(db, await begin(app), 0);
+    expect(answer.battle.status).toBe("ongoing");
+    expect(kindsOf(changes)).toEqual(["battle_advanced"]);
+  });
+
+  it("is the battle and the monster's two numbers, for the turn that wins", async () => {
+    const { app, db } = await onGrass(...WIN);
+    const last = await playUntilTurn(app, await begin(app), 3);
+
+    const { answer, changes } = decide(db, last, 0);
+    expect(answer.battle.status).toBe("won");
+    expect(changes).toMatchObject([
+      { kind: "battle_advanced", id: last.id, state: { status: "won", turn: 4 } },
+      { kind: "monster_settled", exp: DROP_IS_WORTH, damage: 24 - LEFT_AFTER_THE_WIN },
+    ]);
+  });
+
+  it("is those and the player's place as well, for the turn that loses", async () => {
+    const { app, db } = await onGrass(...LOSS);
+    setStored(db, { damage: 3 });
+    const last = await playUntilTurn(app, await begin(app), 5);
+
+    const { answer, changes } = decide(db, last, 1, "bump");
+    expect(answer.battle.status).toBe("lost");
+    expect(changes).toMatchObject([
+      { kind: "battle_advanced", id: last.id, state: { status: "lost" } },
+      { kind: "monster_settled", exp: 0, damage: 0 },
+      { kind: "player_placed", userId: LOCAL_USER_ID, at: HOME },
+    ]);
+  });
+
+  it("writes none of it: asking what a turn would do leaves everything as it was", async () => {
+    const { app, db } = await onGrass(...WIN);
+    const last = await playUntilTurn(app, await begin(app), 3);
+    const before = db.select().from(battles).get();
+
+    decide(db, last, 0);
+
+    expect(db.select().from(battles).get()).toEqual(before);
+    expect(stored(db)).toEqual({ exp: 0, damage: 0 });
+    // And so the turn is still there to be played.
+    expect((await play(app, last)).battle.status).toBe("won");
   });
 });

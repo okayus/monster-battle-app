@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { err, ok } from "@mba/core";
-import type { Result, SaveData } from "@mba/core";
+import type { FinishedBattle, OngoingBattle, Result, SaveData } from "@mba/core";
 import { saves } from "@mba/db";
 
 import { LOCAL_USER_ID } from "./auth.js";
@@ -149,7 +149,13 @@ describe("what the types refuse", () => {
   // below is a test that the line under it does not compile. Take one of the
   // rules away — give `Read` an `insert`, let a user id be any string — and
   // the build stops here.
-  const attempts = (runtime: Runtime, world: World, userId: UserId): void => {
+  const attempts = (
+    runtime: Runtime,
+    world: World,
+    userId: UserId,
+    going: OngoingBattle,
+    over: FinishedBattle,
+  ): void => {
     // @ts-expect-error — a route is handed `read`, and there is nothing on it to write with
     runtime.read.insert(saves);
     // @ts-expect-error — nor is there on the one a decision is handed
@@ -163,7 +169,11 @@ describe("what the types refuse", () => {
 
     // @ts-expect-error — a change is one of the kinds `commit` knows how to write
     const unknown: Change = { kind: "player_teleported", userId, at: ON_GRASS };
-    return void unknown;
+
+    const begun: Change = { kind: "battle_begun", id: "b", userId, monsterId: "m", state: going };
+    // @ts-expect-error — and a battle cannot begin already over
+    const ended: Change = { kind: "battle_begun", id: "b", userId, monsterId: "m", state: over };
+    return void [unknown, begun, ended];
   };
 
   it("is checked by tsc, where a directive with nothing to suppress is an error", () => {
