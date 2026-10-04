@@ -11,7 +11,15 @@ import {
   viewBattle,
   wildCombatant,
 } from "./index.js";
-import type { BattleState, Combatant, Move, OwnedMonster, Species, TurnRolls } from "./index.js";
+import type {
+  BattleState,
+  Combatant,
+  Move,
+  OngoingBattle,
+  OwnedMonster,
+  Species,
+  TurnRolls,
+} from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -45,7 +53,10 @@ function owned(overrides: Partial<OwnedMonster> = {}): OwnedMonster {
 }
 
 /** Even stats on both sides, so the damage is just the move's power times the spread. */
-function evenBattle(player: Partial<Combatant> = {}, enemy: Partial<Combatant> = {}): BattleState {
+function evenBattle(
+  player: Partial<Combatant> = {},
+  enemy: Partial<Combatant> = {},
+): OngoingBattle {
   return startBattle(
     combatant({ name: "こちら", ...player }),
     combatant({ name: "あいて", moves: [BUMP], ...enemy }),
@@ -75,6 +86,9 @@ function deepFreeze<T>(value: T): T {
 }
 
 function played(state: BattleState, moveId: string, rolls: TurnRolls) {
+  // The one look at the stage. Past this line the compiler knows the battle
+  // is still going on, which is what `playTurn` asks for.
+  if (state.status !== "ongoing") throw new Error(`expected a battle still going: ${state.status}`);
   const result = playTurn(state, moveId, rolls);
   if (!result.ok)
     throw new Error(`expected the turn to be played: ${JSON.stringify(result.error)}`);
@@ -273,9 +287,28 @@ describe("playTurn", () => {
     });
   });
 
-  it.each(["won", "lost"] as const)("refuses to go on once the battle is %s", (status) => {
+  it.each(["won", "lost"] as const)("cannot be asked of a battle that is %s", (status) => {
     const over = { ...evenBattle(), status };
-    expect(playTurn(over, "bump", FULL)).toEqual({ ok: false, error: { kind: "battle_over" } });
+    // Not refused when it is asked — impossible to ask. This function is
+    // never called; it is here for `tsc`, which fails on a `@ts-expect-error`
+    // with nothing to suppress. If `playTurn` ever takes a finished battle
+    // again, the build stops on the line below.
+    const attempt = () => {
+      // @ts-expect-error — only a battle that is still going on can be played
+      playTurn(over, "bump", FULL);
+    };
+    expect(attempt).toBeTypeOf("function");
+  });
+
+  it("hands back a battle at whatever stage the turn left it in", () => {
+    const going = played(evenBattle(), "bump", FULL).state;
+    expect(going.status).toBe("ongoing");
+
+    const ended = played(evenBattle({}, { hp: 1 }), "bump", FULL).state;
+    expect(ended.status).toBe("won");
+    // And so the next turn has to look before it plays: `played` above throws
+    // for this one, where the compiler would have stopped a direct call.
+    expect(() => played(ended, "bump", FULL)).toThrow("won");
   });
 
   it("returns a new state and leaves the one it was given alone", () => {
@@ -292,7 +325,7 @@ describe("playTurn", () => {
 
     for (let n = 0; n < 300; n++) {
       const stat = () => 1 + Math.floor(rand() * 30);
-      let state = startBattle(
+      let state: BattleState = startBattle(
         wildCombatant(species({ maxHp: stat(), attack: stat(), defense: stat() })),
         wildCombatant(species({ maxHp: stat(), attack: stat(), defense: stat() })),
       );

@@ -499,19 +499,39 @@ export type Side = "player" | "enemy";
 
 export type BattleStatus = "ongoing" | "won" | "lost";
 
-export interface BattleState {
+/**
+ * A battle at one stage of its life. The stage is in the type.
+ *
+ * That is what lets the rules below say, in their signatures, which stage they
+ * are for: `playTurn` takes a battle that is still going on, `settle` one that
+ * is over. Handing either the wrong one is not a mistake to be caught and
+ * reported while the program runs — it does not compile.
+ */
+export interface Battle<S extends BattleStatus> {
   /**
    * How many turns have been played. The client sends this back with each
    * move, which is how the server tells a move for *this* turn from the same
    * request arriving twice.
    */
   turn: number;
-  status: BattleStatus;
+  status: S;
   player: Combatant;
   enemy: Combatant;
 }
 
-export function startBattle(player: Combatant, enemy: Combatant): BattleState {
+export type OngoingBattle = Battle<"ongoing">;
+export type FinishedBattle = Battle<"won"> | Battle<"lost">;
+
+/**
+ * A battle at whatever stage it happens to be: what is stored, and what is
+ * read back. To do anything with one that depends on the stage, look at
+ * `status` first — after `if (state.status !== "ongoing") …`, the compiler
+ * knows which of the two it is holding, and so that check is made exactly
+ * once, where the battle comes in.
+ */
+export type BattleState = OngoingBattle | FinishedBattle;
+
+export function startBattle(player: Combatant, enemy: Combatant): OngoingBattle {
   return { turn: 0, status: "ongoing", player, enemy };
 }
 
@@ -538,7 +558,11 @@ export type BattleEvent =
   | { kind: "exp_gained"; amount: number }
   | { kind: "level_up"; level: number };
 
-export type BattleError = { kind: "battle_over" } | { kind: "unknown_move"; moveId: string };
+/**
+ * The one way a turn can be refused. "The battle is over" is not among them:
+ * a battle that is over cannot be passed to `playTurn` at all.
+ */
+export type BattleError = { kind: "unknown_move"; moveId: string };
 
 function hit(target: Combatant, damage: number): Combatant {
   return { ...target, hp: Math.max(0, target.hp - damage) };
@@ -553,12 +577,10 @@ function hit(target: Combatant, damage: number): Combatant {
  * won; it sends a move id and is told what happened.
  */
 export function playTurn(
-  state: BattleState,
+  state: OngoingBattle,
   moveId: string,
   rolls: TurnRolls,
 ): Result<{ state: BattleState; events: BattleEvent[] }, BattleError> {
-  if (state.status !== "ongoing") return err({ kind: "battle_over" });
-
   const move = state.player.moves.find((candidate) => candidate.id === moveId);
   if (move === undefined) return err({ kind: "unknown_move", moveId });
 
@@ -617,8 +639,9 @@ export interface Settlement {
 }
 
 /**
- * What becomes of the player's monster when a battle is over. Undefined while
- * the battle is still going: there is nothing to settle yet.
+ * What becomes of the player's monster when a battle is over. Only a battle
+ * that is over can be settled: while one is still going there is nothing to
+ * settle yet, and no way to ask.
  *
  * Won: it earns experience, and keeps the damage it took. What it has left is
  * what it starts its next battle with.
@@ -631,11 +654,7 @@ export interface Settlement {
  * The caller writes them down in the same breath as the battle itself, so a
  * battle cannot be over without having been settled, or settled twice.
  */
-export function settle(
-  monster: Pick<OwnedMonster, "exp">,
-  state: BattleState,
-): Settlement | undefined {
-  if (state.status === "ongoing") return undefined;
+export function settle(monster: Pick<OwnedMonster, "exp">, state: FinishedBattle): Settlement {
   if (state.status === "lost") return { exp: monster.exp, damage: 0, events: [] };
 
   // Experience stops where the top level begins, so the stored number has a

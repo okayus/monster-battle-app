@@ -151,6 +151,10 @@ export function battleRoutes(db: Db, random: () => number) {
       return c.json({ error: { kind: "stale_turn", turn: state.turn } }, 400);
     }
 
+    // The one look at the stage: past this line the compiler knows the battle
+    // is still going on, which is what `playTurn` asks for.
+    if (state.status !== "ongoing") return c.json({ error: { kind: "battle_over" } }, 400);
+
     const played = playTurn(state, shape.value.moveId, {
       playerVariance: random(),
       enemyMove: random(),
@@ -187,8 +191,8 @@ export function battleRoutes(db: Db, random: () => number) {
         .where(eq(ownedMonsters.id, monsterId))
         .get();
       // Nothing to settle while the battle is still going.
-      const settled = fighter === undefined ? undefined : settle(fighter, next);
-      if (settled === undefined) return;
+      if (fighter === undefined || next.status === "ongoing") return;
+      const settled = settle(fighter, next);
 
       tx.update(ownedMonsters)
         .set({ exp: settled.exp, damage: settled.damage })

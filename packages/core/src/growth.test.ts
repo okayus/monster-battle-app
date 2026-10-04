@@ -14,7 +14,7 @@ import {
   viewMonster,
   wildCombatant,
 } from "./index.js";
-import type { BattleState, Combatant, OwnedMonster, Species } from "./index.js";
+import type { BattleState, Combatant, FinishedBattle, OwnedMonster, Species } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -241,7 +241,7 @@ function finished(
   mine: OwnedMonster,
   left: Partial<Combatant> = {},
   enemy: Partial<Combatant> = {},
-): BattleState {
+): FinishedBattle {
   const state = startBattle(combatantOf(mine), wildCombatant(DROP));
   return {
     ...state,
@@ -280,22 +280,29 @@ describe("expFor", () => {
 });
 
 describe("settle", () => {
-  it("has nothing to say while the battle is still going", () => {
+  it("cannot be asked for while the battle is still going", () => {
     const state = startBattle(combatantOf(monster()), wildCombatant(DROP));
-    expect(settle(monster(), state)).toBeUndefined();
+    // There is nothing to settle yet, and no way to ask. This function is
+    // never called; it is here for `tsc`, which fails on a `@ts-expect-error`
+    // with nothing to suppress.
+    const attempt = () => {
+      // @ts-expect-error — only a battle that is over can be settled
+      settle(monster(), state);
+    };
+    expect(attempt).toBeTypeOf("function");
   });
 
   describe("a win", () => {
     it("adds what the enemy was worth to the monster's experience", () => {
       const mine = monster({ exp: 3 });
       const settled = settle(mine, finished("won", mine, { hp: 15 }));
-      expect(settled?.exp).toBe(12);
+      expect(settled.exp).toBe(12);
     });
 
     it("keeps the damage: what the monster has left is what it takes into its next battle", () => {
       const mine = monster();
       const settled = settle(mine, finished("won", mine, { hp: 15 }));
-      expect(settled?.damage).toBe(9);
+      expect(settled.damage).toBe(9);
       expect(grown({ ...mine, ...settled }).hp).toBe(15);
     });
 
@@ -303,17 +310,17 @@ describe("settle", () => {
       // In on 18 of 24, out on 11: 13 lost in all.
       const mine = monster({ damage: 6 });
       const settled = settle(mine, finished("won", mine, { hp: 11 }));
-      expect(settled?.damage).toBe(13);
+      expect(settled.damage).toBe(13);
     });
 
     it("leaves no damage after a win without a scratch", () => {
       const mine = monster();
-      expect(settle(mine, finished("won", mine))?.damage).toBe(0);
+      expect(settle(mine, finished("won", mine)).damage).toBe(0);
     });
 
     it("reports the experience, and no level when it did not change", () => {
       const mine = monster();
-      expect(settle(mine, finished("won", mine))?.events).toEqual([
+      expect(settle(mine, finished("won", mine)).events).toEqual([
         { kind: "exp_gained", amount: 9 },
       ]);
     });
@@ -321,8 +328,8 @@ describe("settle", () => {
     it("reports the new level, after the experience that brought it", () => {
       const mine = monster({ exp: 5 });
       const settled = settle(mine, finished("won", mine, { hp: 15 }));
-      expect(settled?.exp).toBe(14);
-      expect(settled?.events).toEqual([
+      expect(settled.exp).toBe(14);
+      expect(settled.events).toEqual([
         { kind: "exp_gained", amount: 9 },
         { kind: "level_up", level: 2 },
       ]);
@@ -332,8 +339,8 @@ describe("settle", () => {
       const mine = monster();
       const giant = { maxHp: 999, attack: 999, defense: 999 };
       const settled = settle(mine, finished("won", mine, {}, giant));
-      expect(settled?.exp).toBe(749);
-      expect(settled?.events).toEqual([
+      expect(settled.exp).toBe(749);
+      expect(settled.events).toEqual([
         { kind: "exp_gained", amount: 749 },
         { kind: "level_up", level: levelOf(749) },
       ]);
@@ -351,7 +358,7 @@ describe("settle", () => {
       const state = finished("won", mine);
       DROP.maxHp = 999;
       try {
-        expect(settle(mine, state)?.exp).toBe(9);
+        expect(settle(mine, state).exp).toBe(9);
       } finally {
         DROP.maxHp = 20;
       }
@@ -374,7 +381,7 @@ describe("settle", () => {
 
     it("never takes experience away, even from a monster that is somehow past the top", () => {
       const beyond = monster({ exp: expToReach(GROWTH.maxLevel) + 500 });
-      expect(settle(beyond, finished("won", beyond))?.exp).toBe(beyond.exp);
+      expect(settle(beyond, finished("won", beyond)).exp).toBe(beyond.exp);
     });
   });
 
@@ -387,7 +394,7 @@ describe("settle", () => {
     it("restores the monster to full health, whatever it went in with", () => {
       const mine = monster({ exp: 40, damage: 20 });
       const settled = settle(mine, finished("lost", mine));
-      expect(settled?.damage).toBe(0);
+      expect(settled.damage).toBe(0);
       expect(grown({ ...mine, ...settled })).toMatchObject({ maxHp: 28, hp: 28 });
     });
   });
@@ -402,17 +409,20 @@ describe("settle", () => {
 
   it("settles a battle as it was actually played, turn by turn", () => {
     const mine = monster();
-    let state = startBattle(combatantOf(mine), wildCombatant(DROP));
+    let state: BattleState = startBattle(combatantOf(mine), wildCombatant(DROP));
     for (let turn = 0; turn < 50 && state.status === "ongoing"; turn++) {
       const result = playTurn(state, "bite", { playerVariance: 1, enemyMove: 0, enemyVariance: 0 });
       if (!result.ok) throw new Error("the turn was refused");
       state = result.value.state;
     }
     expect(state.status).toBe("won");
+    // Said again for the compiler: `settle` takes a battle that is over, and
+    // the line above is not something it can read.
+    if (state.status === "ongoing") throw new Error("the battle did not end");
 
     const settled = settle(mine, state);
-    expect(settled?.exp).toBe(9);
-    expect(settled?.damage).toBe(24 - state.player.hp);
-    expect(settled?.damage).toBeGreaterThan(0);
+    expect(settled.exp).toBe(9);
+    expect(settled.damage).toBe(24 - state.player.hp);
+    expect(settled.damage).toBeGreaterThan(0);
   });
 });
