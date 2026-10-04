@@ -11,7 +11,7 @@
  * Nothing here is a defence. The server validates every recipe again.
  */
 
-import { Suspense, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { ok } from "@mba/core";
@@ -46,18 +46,17 @@ export function LookScreen() {
   const [loading] = useState(load);
 
   return (
-    <Suspense fallback={<p>読み込み中…</p>}>
-      <Loaded
-        from={loading}
-        failed={(error) => (
-          <section aria-label="きがえ">
-            <p role="alert">きがえを読み込めなかった（{error.kind}）</p>
-          </section>
-        )}
-      >
-        {({ skins, appearance }) => <Wardrobe skins={skins} worn={appearance} />}
-      </Loaded>
-    </Suspense>
+    <Loaded
+      from={loading}
+      waiting={<p>読み込み中…</p>}
+      failed={(error) => (
+        <section aria-label="きがえ">
+          <p role="alert">きがえを読み込めなかった（{error.kind}）</p>
+        </section>
+      )}
+    >
+      {({ skins, appearance }) => <Wardrobe skins={skins} worn={appearance} />}
+    </Loaded>
   );
 }
 

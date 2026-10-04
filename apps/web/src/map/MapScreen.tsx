@@ -15,7 +15,7 @@
  * function cannot: listen for keys, send requests, and change the address.
  */
 
-import { Suspense, startTransition, useCallback, useEffect, useReducer, useState } from "react";
+import { useCallback, useEffect, useReducer, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { ok } from "@mba/core";
@@ -23,7 +23,7 @@ import type { Direction, GameMap, Position, Result, TileKind } from "@mba/core";
 
 import { fetchMap, fetchSave, putSave, startBattle, travelThroughExit } from "../api.js";
 import type { ApiError } from "../api.js";
-import { Loaded } from "../loaded.js";
+import { Loaded, remember, useSettled } from "../loaded.js";
 import { fetchWornLook } from "../look/load.js";
 import type { WornLook } from "../look/load.js";
 import { Playing } from "../Playing.js";
@@ -62,14 +62,11 @@ async function arrive(): Promise<Result<Arrival, ApiError>> {
  * What the player looks like is asked for beside the map, not before it:
  * walking does not wait for a picture.
  *
- * Both requests are started here, by the screen, and handed down as promises.
- * Nothing further down makes one. A component that is being rendered for the
- * first time, inside a boundary that is still waiting, has no state yet — if
- * React starts that render over, whatever it began is begun again. A request
- * started there is a request per attempt.
+ * Both requests are started here, by the screen, and handed down as promises
+ * (loaded.tsx). Nothing further down makes one.
  */
 function requests(count: number) {
-  return { count, loading: arrive(), worn: fetchWornLook() };
+  return { count, loading: remember(arrive()), worn: remember(fetchWornLook()) };
 }
 
 export function MapScreen() {
@@ -80,34 +77,32 @@ export function MapScreen() {
   // opened: the save, then the map it names. What is on screen after
   // travelling is therefore what a reload would show, by construction.
   //
-  // As a transition, so that the map the player left stays up until the
-  // answer is in, instead of giving way to "loading".
+  // The next arrival takes the screen only once its answer is in. Until
+  // then the map the player left stays up, instead of giving way to
+  // "loading".
   const onTravelled = useCallback(() => {
-    // Started here, in the callback — not inside the state update, which
-    // React may run more than once.
     const next = requests(arrival.count + 1);
-    startTransition(() => setArrival(next));
+    void next.loading.then(() => setArrival(next));
   }, [arrival.count]);
 
   return (
-    <Suspense fallback={<p>読み込み中…</p>}>
-      <Loaded
-        from={arrival.loading}
-        failed={(error) => <p role="alert">マップを読み込めなかった（{error.kind}）</p>}
-      >
-        {({ map, start }) => (
-          // Keyed by arrival, so each one starts from a fresh position and
-          // saver — also when an exit leads to another tile of the same map.
-          <MapView
-            key={arrival.count}
-            map={map}
-            start={start}
-            worn={arrival.worn}
-            onTravelled={onTravelled}
-          />
-        )}
-      </Loaded>
-    </Suspense>
+    <Loaded
+      from={arrival.loading}
+      waiting={<p>読み込み中…</p>}
+      failed={(error) => <p role="alert">マップを読み込めなかった（{error.kind}）</p>}
+    >
+      {({ map, start }) => (
+        // Keyed by arrival, so each one starts from a fresh position and
+        // saver — also when an exit leads to another tile of the same map.
+        <MapView
+          key={arrival.count}
+          map={map}
+          start={start}
+          wearing={arrival.worn}
+          onTravelled={onTravelled}
+        />
+      )}
+    </Loaded>
   );
 }
 
@@ -166,22 +161,13 @@ const door: CSSProperties = {
  * The player, on the tile they stand on: drawn in what they are wearing, or as
  * a plain dot until that has loaded — and for good if it cannot be. A missing
  * picture is not worth stopping a walk for.
- *
- * The dot is the fallback in both senses: what the boundary shows while the
- * look is on its way, and what is drawn if it never arrives.
  */
-function PlayerMarker({ worn }: { worn: Promise<Result<WornLook, ApiError>> }) {
-  const plain = <div data-player style={dot} />;
+function PlayerMarker({ worn }: { worn: WornLook | null }) {
+  if (worn === null) return <div data-player style={dot} />;
   return (
-    <Suspense fallback={plain}>
-      <Loaded from={worn} failed={() => plain}>
-        {({ look, appearance }) => (
-          <div data-player style={figure}>
-            <Playing skin={look} colours={appearance.colours} />
-          </div>
-        )}
-      </Loaded>
-    </Suspense>
+    <div data-player style={figure}>
+      <Playing skin={worn.look} colours={worn.appearance.colours} />
+    </div>
   );
 }
 
@@ -197,22 +183,24 @@ function saveText(status: SaveStatus<ApiError> | null): string {
 function MapView({
   map,
   start,
-  worn,
+  wearing,
   onTravelled,
 }: {
   map: GameMap;
   start: Position;
-  /**
-   * What the player looks like, on its way or already here. The marker is a
-   * new element on every tile the player steps onto, and each of them reads
-   * this same promise — so the look is fetched once.
-   */
-  worn: Promise<Result<WornLook, ApiError>>;
+  /** What the player looks like, on its way or already here. */
+  wearing: Promise<Result<WornLook, ApiError>>;
   /** Called once the server has taken the player through an exit. */
   onTravelled: () => void;
 }) {
   const [state, dispatch] = useReducer(walk, arrived(map, start));
   const { position } = state;
+
+  // Read here and not in the marker, because the marker is a new element on
+  // every tile the player steps onto. Null until it has loaded, and for good
+  // if it could not be.
+  const look = useSettled(wearing);
+  const worn = look?.ok ? look.value : null;
 
   // One saver for the life of this view. It serialises the saves, so a burst
   // of steps cannot leave an older position stored last (see saver.ts).

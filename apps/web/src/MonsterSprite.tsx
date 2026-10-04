@@ -4,16 +4,13 @@
  * It is handed the request, not the id of the skin. Whoever loaded the monster
  * started fetching its picture in the same breath — the battle screen and the
  * monsters screen each do, in the function that loads them — and this only
- * waits for it. A component that began the request itself, on its first
- * render, would begin it again every time that render was started over
- * (loaded.tsx).
+ * waits for it (loaded.tsx).
  *
  * If the picture cannot be fetched the box stays empty and whatever is showing
  * it carries on: a missing picture is not worth stopping a fight for, or a
  * list.
  */
 
-import { Suspense } from "react";
 import type { CSSProperties } from "react";
 
 import type { Result } from "@mba/core";
@@ -21,7 +18,7 @@ import type { RenderableSkin } from "@mba/sprite";
 import { Sprite } from "@mba/sprite-react";
 
 import type { ApiError } from "./api.js";
-import { Loaded } from "./loaded.js";
+import { useSettled } from "./loaded.js";
 
 /** A skin's drawing, on its way or already here: what `fetchSkin` returns. */
 export type Picture = Promise<Result<RenderableSkin, ApiError>>;
@@ -32,13 +29,6 @@ function box(size: string): CSSProperties {
 }
 
 export function MonsterSprite({ picture, size = "8rem" }: { picture: Picture; size?: string }) {
-  return (
-    <div style={box(size)}>
-      <Suspense fallback={null}>
-        <Loaded from={picture} failed={() => null}>
-          {(skin) => <Sprite skin={skin} />}
-        </Loaded>
-      </Suspense>
-    </div>
-  );
+  const skin = useSettled(picture);
+  return <div style={box(size)}>{skin?.ok && <Sprite skin={skin.value} />}</div>;
 }

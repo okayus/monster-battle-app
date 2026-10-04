@@ -13,7 +13,7 @@
  * screen only says so.
  */
 
-import { Suspense, useReducer, useState } from "react";
+import { useReducer, useState } from "react";
 import type { CSSProperties } from "react";
 
 import { ok } from "@mba/core";
@@ -38,7 +38,8 @@ async function open(id: string): Promise<Result<Opening, ApiError>> {
   const battle = await fetchBattle(id);
   if (!battle.ok) return battle;
   const { player, enemy } = battle.value;
-  // Started here and not by the two sprites: see MonsterSprite.tsx.
+  // Started here and not by the two sprites: both at once, the moment it is
+  // known whose they are.
   const pictures = { player: fetchSkin(player.skinId), enemy: fetchSkin(enemy.skinId) };
   return ok({ battle: battle.value, pictures });
 }
@@ -51,19 +52,18 @@ export function BattleScreen({ id }: { id: string }) {
   const [opening] = useState(() => open(id));
 
   return (
-    <Suspense fallback={<p>読み込み中…</p>}>
-      <Loaded
-        from={opening}
-        failed={(error) => (
-          <section aria-label="バトル">
-            <p role="alert">バトルを読み込めなかった（{error.kind}）</p>
-            <a href={hrefs.map}>マップに戻る</a>
-          </section>
-        )}
-      >
-        {({ battle, pictures }) => <Battle initial={battle} pictures={pictures} />}
-      </Loaded>
-    </Suspense>
+    <Loaded
+      from={opening}
+      waiting={<p>読み込み中…</p>}
+      failed={(error) => (
+        <section aria-label="バトル">
+          <p role="alert">バトルを読み込めなかった（{error.kind}）</p>
+          <a href={hrefs.map}>マップに戻る</a>
+        </section>
+      )}
+    >
+      {({ battle, pictures }) => <Battle initial={battle} pictures={pictures} />}
+    </Loaded>
   );
 }
 

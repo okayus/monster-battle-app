@@ -12,12 +12,13 @@
  * built in.
  */
 
-import { Suspense, use, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import { BattleScreen } from "./battle/BattleScreen.js";
 import { fromSkin, newEditor } from "./editor/model.js";
 import { SkinEditor } from "./editor/SkinEditor.js";
+import { useSettled } from "./loaded.js";
 import { LookScreen } from "./look/LookScreen.js";
 import { MapScreen } from "./map/MapScreen.js";
 import { MonstersScreen } from "./MonstersScreen.js";
@@ -52,10 +53,6 @@ function checkHealth(): Promise<string> {
     .catch((e: unknown) => `unreachable: ${String(e)}`);
 }
 
-function Health({ from }: { from: Promise<string> }) {
-  return <strong>{use(from)}</strong>;
-}
-
 const page: CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   padding: "2rem",
@@ -67,7 +64,8 @@ const nav: CSSProperties = { display: "flex", gap: "1.5rem" };
 const columns: CSSProperties = { display: "flex", gap: "3rem", flexWrap: "wrap" };
 
 export function App() {
-  const [health] = useState(checkHealth);
+  const [checking] = useState(checkHealth);
+  const health = useSettled(checking) ?? "...";
   const route = useRoute();
   // The drawing in progress is kept up here, above the screens, so that a look
   // at the map does not throw it away. It does not survive a reload.
@@ -91,10 +89,7 @@ export function App() {
         </a>
       </nav>
       <p>
-        API 疎通:{" "}
-        <Suspense fallback={<strong>...</strong>}>
-          <Health from={health} />
-        </Suspense>
+        API 疎通: <strong>{health}</strong>
       </p>
 
       {route.screen === "map" && <MapScreen />}

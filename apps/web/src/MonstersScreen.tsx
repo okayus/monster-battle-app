@@ -9,7 +9,7 @@
  * the link is what it went in with; what it has left is the battle's to say.
  */
 
-import { Suspense, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import { ok } from "@mba/core";
@@ -33,7 +33,7 @@ async function load(): Promise<Result<Owned[], ApiError>> {
   const monsters = await fetchMonsters();
   if (!monsters.ok) return monsters;
   // The pictures are asked for here, as soon as it is known which skins they
-  // are, and not by the sprites that will show them: see MonsterSprite.tsx.
+  // are, and not by the sprites that will show them.
   return ok(monsters.value.map((monster) => ({ monster, picture: fetchSkin(monster.skinId) })));
 }
 
@@ -41,18 +41,17 @@ export function MonstersScreen() {
   const [loading] = useState(load);
 
   return (
-    <Suspense fallback={<p>読み込み中…</p>}>
-      <Loaded
-        from={loading}
-        failed={(error) => (
-          <section aria-label="なかま">
-            <p role="alert">なかまを読み込めなかった（{error.kind}）</p>
-          </section>
-        )}
-      >
-        {(owned) => <Monsters owned={owned} />}
-      </Loaded>
-    </Suspense>
+    <Loaded
+      from={loading}
+      waiting={<p>読み込み中…</p>}
+      failed={(error) => (
+        <section aria-label="なかま">
+          <p role="alert">なかまを読み込めなかった（{error.kind}）</p>
+        </section>
+      )}
+    >
+      {(owned) => <Monsters owned={owned} />}
+    </Loaded>
   );
 }
 

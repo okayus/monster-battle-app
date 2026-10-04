@@ -5,7 +5,7 @@
  * validator, into SQLite, and back out.
  */
 
-import { Suspense, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { Skin } from "@mba/sprite";
@@ -45,29 +45,28 @@ export function SavedSkin({ id, onOpen }: { id: string; onOpen: (skin: Skin) => 
       <p>
         <code>GET /api/skins/{id}</code> の応答を描いている。
       </p>
-      <Suspense fallback={<p>読み込み中…</p>}>
-        <Loaded
-          from={drawing}
-          failed={(error) => <p role="alert">取得できなかった（{error.kind}）</p>}
-        >
-          {(skin) => (
-            <>
-              <div style={frame}>
-                <Playing skin={skin} />
-              </div>
-              <p>
-                <button type="button" onClick={() => void open()}>
-                  このスキンをエディタで開く
-                </button>
-              </p>
-              <p>開くと、いまエディタにある絵は置きかわる。保存すると新しいスキンになる。</p>
-              <p>
-                このスキンは<a href={hrefs.look}>きがえ</a>で着られる。
-              </p>
-            </>
-          )}
-        </Loaded>
-      </Suspense>
+      <Loaded
+        from={drawing}
+        waiting={<p>読み込み中…</p>}
+        failed={(error) => <p role="alert">取得できなかった（{error.kind}）</p>}
+      >
+        {(skin) => (
+          <>
+            <div style={frame}>
+              <Playing skin={skin} />
+            </div>
+            <p>
+              <button type="button" onClick={() => void open()}>
+                このスキンをエディタで開く
+              </button>
+            </p>
+            <p>開くと、いまエディタにある絵は置きかわる。保存すると新しいスキンになる。</p>
+            <p>
+              このスキンは<a href={hrefs.look}>きがえ</a>で着られる。
+            </p>
+          </>
+        )}
+      </Loaded>
       {openError !== null && <p role="alert">開けなかった（{openError.kind}）</p>}
     </section>
   );
