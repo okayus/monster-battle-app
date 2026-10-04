@@ -147,8 +147,26 @@ describe("POST /api/skins", () => {
     expect(second).not.toBe(first);
   });
 
+  it("takes each id from the app, not from the request", async () => {
+    const ids = ["the-first-skin", "the-second-skin"];
+    const { app, db } = setup({ newId: () => ids.shift() ?? "none-left" });
+
+    expect(await save(app, inputWith({ id: "chosen-by-the-client" }))).toBe("the-first-skin");
+    expect(await save(app, validInput())).toBe("the-second-skin");
+    expect(skinById(db, "the-first-skin")?.ownerId).toBe(LOCAL_USER_ID);
+    expect(skinById(db, "chosen-by-the-client")).toBeUndefined();
+  });
+
   describe("rejects with 400, and stores nothing", () => {
-    const palette = (entry: Record<string, unknown>) => ({ palette: [entry] });
+    const palette = (...entries: Record<string, unknown>[]) => ({ palette: entries });
+
+    /** The fixture, with these cells as the one frame of its body. */
+    const bodyCells = (cells: [number, number][]) => ({
+      parts: PART_SLOTS.map((slot) => ({
+        slot,
+        frames: [{ durationMs: 120, cells: slot === "body" ? cells : [[0, CELLS_PER_FRAME]] }],
+      })),
+    });
 
     it.each([
       [
@@ -160,6 +178,21 @@ describe("POST /api/skins", () => {
         "a palette id that could escape the CSS variable name",
         palette({ id: "x;color:red", hex: "#123456" }),
         { kind: "bad_palette_id", id: "x;color:red" },
+      ],
+      [
+        "the same palette id twice",
+        palette({ id: "skin", hex: "#123456" }, { id: "skin", hex: "#654321" }),
+        { kind: "duplicate_palette_id", id: "skin" },
+      ],
+      [
+        "cells that do not add up to one canvas",
+        bodyCells([[0, 100]]),
+        { kind: "bad_cell_count", slot: "body", frame: 0, got: 100 },
+      ],
+      [
+        "a cell painted in a colour the palette does not have",
+        bodyCells([[9, CELLS_PER_FRAME]]),
+        { kind: "bad_palette_index", slot: "body", frame: 0, index: 9 },
       ],
       [
         "a skin with a slot missing",
@@ -184,6 +217,26 @@ describe("POST /api/skins", () => {
       const res = await post(app, "{ not json");
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ error: { kind: "bad_json" } });
+      expect(savedByPlayers(db)).toEqual([]);
+    });
+
+    it("a body that fits the limit as it was sent, but not as it would be stored", async () => {
+      // The other of the two size limits (docs/04-api-design.md). 1e20 is four
+      // bytes on the wire and twenty-one once it has been read and written
+      // out again, so this body passes the limit on what is *read* and then
+      // meets the one on what is *stored* — which is `parseSkin`'s, and a 400.
+      const padded = JSON.stringify(inputWith({ pad: [] })).replace(
+        '"pad":[]',
+        `"pad":[${new Array<string>(4000).fill("1e20").join(",")}]`,
+      );
+      expect(padded.length).toBeLessThan(SKIN_SPEC.maxBytes);
+
+      const { app, db } = setup();
+      const res = await post(app, padded);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toMatchObject({
+        error: { kind: "too_large", max: SKIN_SPEC.maxBytes },
+      });
       expect(savedByPlayers(db)).toEqual([]);
     });
 

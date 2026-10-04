@@ -16,6 +16,9 @@
 
 import type { Context } from "hono";
 
+import type { SkinError } from "@mba/sprite";
+
+import type { LookError } from "./appearance.js";
 import type { BeginError, TurnError } from "./battles.js";
 import type { BodyError } from "./http.js";
 import type { SaveError, TravelError } from "./saves.js";
@@ -27,7 +30,9 @@ export type Refusal =
   | SaveError
   | TravelError
   | BeginError
-  | TurnError;
+  | TurnError
+  | SkinError
+  | LookError;
 
 /**
  * 400 the request is wrong, 403 the caller may not, 404 there is no such
@@ -60,6 +65,19 @@ const STATUS = {
   stale_turn: 400,
   battle_over: 400,
   unknown_move: 400,
+
+  // Skins and looks: what `parseSkin` and `parseAppearance` refuse
+  // (docs/02-sprite-format.md), and what a recipe may not name.
+  too_large: 400,
+  too_many: 400,
+  bad_cell_count: 400,
+  bad_palette_id: 400,
+  duplicate_palette_id: 400,
+  bad_hex: 400,
+  bad_palette_index: 400,
+  missing_slot: 400,
+  unknown_skin: 400,
+  unknown_colour: 400,
 } as const satisfies Record<Refusal["kind"], Status>;
 
 /** Answers with an error: the value as it is, under the status its kind has. */

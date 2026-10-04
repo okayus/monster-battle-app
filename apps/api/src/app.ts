@@ -51,11 +51,11 @@ export function createApp({ db, migrationsApplied, ...sources }: AppDeps) {
 
   app.get("/api/health", (c) => c.json({ status: "ok", migrationsApplied }));
 
-  app.route("/api/skins", skinRoutes(db));
+  app.route("/api/skins", skinRoutes(runtime));
   app.route("/api/maps", mapRoutes(runtime.read));
   app.route("/api/save", saveRoutes(runtime));
   app.route("/api/travel", travelRoutes(runtime));
-  app.route("/api/appearance", appearanceRoutes(db));
+  app.route("/api/appearance", appearanceRoutes(runtime));
   app.route("/api/monsters", monsterRoutes(runtime.read));
   app.route("/api/battles", battleRoutes(runtime));
 

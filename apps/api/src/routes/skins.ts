@@ -12,19 +12,18 @@
  * the same shape would drift from it.
  */
 
-import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 
 import type { WearableSkin } from "@mba/core";
-import { skins } from "@mba/db";
-import type { Db } from "@mba/db";
-import { SKIN_SPEC, parseSkin } from "@mba/sprite";
+import { SKIN_SPEC } from "@mba/sprite";
 
 import { getUserId } from "../auth.js";
 import { jsonBodyLimit, readJson } from "../http.js";
-import { listSkins, skinRow } from "../skins.js";
+import { refuse } from "../refusals.js";
+import type { Runtime } from "../runtime.js";
+import { drawSkin, listSkins, storedDrawing, storedSource } from "../skins.js";
 
-export function skinRoutes(db: Db) {
+export function skinRoutes({ read, perform }: Runtime) {
   const routes = new Hono();
 
   routes.get("/", (c) => {
@@ -35,7 +34,7 @@ export function skinRoutes(db: Db) {
     //
     // A retired skin is not on this list — not even for whoever drew it. That
     // is what retiring means on this side of the API: no longer offered.
-    const wearable: WearableSkin[] = listSkins(db)
+    const wearable: WearableSkin[] = listSkins(read)
       .filter((skin) => !skin.retired)
       .map((skin) => ({ id: skin.id, name: skin.name, mine: skin.ownerId === userId }));
     return c.json(wearable);
@@ -51,54 +50,27 @@ export function skinRoutes(db: Db) {
     jsonBodyLimit(SKIN_SPEC.maxBytes),
     async (c) => {
       const body = await readJson(c);
-      if (!body.ok) return c.json({ error: body.error }, 400);
+      if (!body.ok) return refuse(c, body.error);
 
-      const parsed = parseSkin(body.value);
-      if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+      const drawn = perform((world) => drawSkin(world, getUserId(c), body.value));
+      if (!drawn.ok) return refuse(c, drawn.error);
 
-      // From here on only `skin` is used — never `body.value`. What goes into
-      // the database is the value parseSkin rebuilt, so nothing the validator
-      // did not look at can reach storage.
-      const skin = parsed.value;
-      const id = crypto.randomUUID();
-
-      // The owner is decided by the server. The body has no say in it.
-      db.insert(skins)
-        .values(skinRow(id, getUserId(c), skin, new Date()))
-        .run();
-
+      const { id } = drawn.value;
       return c.json({ id }, 201, { Location: `/api/skins/${id}` });
     },
   );
 
+  // The stored text goes out as it is, already JSON (see skins.ts).
   routes.get("/:id", (c) => {
-    const row = db
-      .select({ renderable: skins.renderable })
-      .from(skins)
-      .where(eq(skins.id, c.req.param("id")))
-      .get();
-    if (row === undefined) return c.json({ error: { kind: "not_found" } }, 404);
-
-    // The stored text goes out as it is: no parse, no re-serialize. This is
-    // the payoff of deriving the render-ready form at write time — the read
-    // path is one indexed lookup and a copy.
-    return c.body(row.renderable, 200, { "Content-Type": "application/json" });
+    const text = storedDrawing(read, c.req.param("id"));
+    if (text === undefined) return refuse(c, { kind: "not_found" });
+    return c.body(text, 200, { "Content-Type": "application/json" });
   });
 
   routes.get("/:id/source", (c) => {
-    const row = db
-      .select({ source: skins.source })
-      .from(skins)
-      .where(eq(skins.id, c.req.param("id")))
-      .get();
-    if (row === undefined) return c.json({ error: { kind: "not_found" } }, 404);
-
-    // The other half of what was stored: the skin as `parseSkin` rebuilt it,
-    // which is what an editor needs to carry on from. Screens that only draw
-    // never ask for this: they would have to expand and merge it themselves,
-    // which is the work that was done once, at write time, so that no read
-    // has to repeat it.
-    return c.body(row.source, 200, { "Content-Type": "application/json" });
+    const text = storedSource(read, c.req.param("id"));
+    if (text === undefined) return refuse(c, { kind: "not_found" });
+    return c.body(text, 200, { "Content-Type": "application/json" });
   });
 
   return routes;

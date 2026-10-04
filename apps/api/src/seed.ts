@@ -16,10 +16,11 @@ import type { Result } from "@mba/core";
 import { mapEncounters, moves, ownedMonsters, skins, species, speciesMoves } from "@mba/db";
 import type { Db } from "@mba/db";
 import { CELLS_PER_FRAME, PART_SLOTS, SKIN_SPEC, packFrame, parseSkin } from "@mba/sprite";
-import type { PaletteEntry, PartSlot, Skin, SkinError } from "@mba/sprite";
+import type { PaletteEntry, Parsed, PartSlot, Skin, SkinError } from "@mba/sprite";
 
 import { DEFAULT_SKIN_ID } from "./appearance.js";
 import { LOCAL_USER_ID, ensureLocalUser } from "./auth.js";
+import type { UserId } from "./auth.js";
 import { START_MAP_ID, ensureStarterMap } from "./maps.js";
 import type { MapArtError } from "./maps.js";
 import { skinRow } from "./skins.js";
@@ -169,7 +170,7 @@ function cellsOf(rows: readonly string[]): number[] {
  * as the validator's own errors, so the skins that ship with the game are held
  * to exactly the rules a player's are.
  */
-function monsterSkin(kind: SpeciesSeed): Result<Skin, SkinError> {
+function monsterSkin(kind: SpeciesSeed): Result<Parsed<Skin>, SkinError> {
   const grid = cellsOf(kind.art);
   const blank = packFrame(new Array<number>(CELLS_PER_FRAME).fill(0), FRAME_MS);
   return parseSkin({
@@ -253,7 +254,7 @@ const PLAYER_ART: Record<PartSlot, { top: number; rows: string[] }> = {
 };
 
 /** Through `parseSkin`, like every other skin: see `monsterSkin`. */
-function playerSkin(): Result<Skin, SkinError> {
+function playerSkin(): Result<Parsed<Skin>, SkinError> {
   const size = SKIN_SPEC.canvasSize;
   return parseSkin({
     formatVersion: 1,
@@ -298,7 +299,7 @@ function seedMonsters(db: Db, now: Date): Result<void, SeedError> {
   if (db.select({ id: species.id }).from(species).get() !== undefined) return ok(undefined);
 
   // Every drawing is validated before anything is written.
-  const drawn: { kind: SpeciesSeed; skin: Skin }[] = [];
+  const drawn: { kind: SpeciesSeed; skin: Parsed<Skin> }[] = [];
   for (const kind of SPECIES) {
     const skin = monsterSkin(kind);
     if (!skin.ok) return err({ kind: "bad_monster_skin", species: kind.id, error: skin.error });
@@ -338,7 +339,7 @@ function seedMonsters(db: Db, now: Date): Result<void, SeedError> {
 }
 
 /** Gives a player their first monster, if they have none. */
-function ensureStarterMonster(db: Db, userId: string, now: Date): void {
+function ensureStarterMonster(db: Db, userId: UserId, now: Date): void {
   const owned = db
     .select({ id: ownedMonsters.id })
     .from(ownedMonsters)

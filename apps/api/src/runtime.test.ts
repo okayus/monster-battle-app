@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { err, ok } from "@mba/core";
 import type { FinishedBattle, OngoingBattle, Result, SaveData } from "@mba/core";
 import { saves } from "@mba/db";
+import type { Appearance, Parsed, Skin } from "@mba/sprite";
 
 import { LOCAL_USER_ID } from "./auth.js";
 import type { UserId } from "./auth.js";
@@ -11,6 +12,7 @@ import { START_MAP_ID } from "./maps.js";
 import { createRuntime, unchanged } from "./runtime.js";
 import type { Decision, Runtime, Sources, World } from "./runtime.js";
 import { savePosition } from "./saves.js";
+import { skinRow } from "./skins.js";
 import { firstTile, setup, starter } from "./testing.js";
 
 // ---------------------------------------------------------------------------
@@ -155,6 +157,8 @@ describe("what the types refuse", () => {
     userId: UserId,
     going: OngoingBattle,
     over: FinishedBattle,
+    drawn: { byHand: Skin; parsed: Parsed<Skin> },
+    recipe: Parsed<Appearance>,
   ): void => {
     // @ts-expect-error — a route is handed `read`, and there is nothing on it to write with
     runtime.read.insert(saves);
@@ -173,7 +177,22 @@ describe("what the types refuse", () => {
     const begun: Change = { kind: "battle_begun", id: "b", userId, monsterId: "m", state: going };
     // @ts-expect-error — and a battle cannot begin already over
     const ended: Change = { kind: "battle_begun", id: "b", userId, monsterId: "m", state: over };
-    return void [unknown, begun, ended];
+
+    // @ts-expect-error — a skin becomes a row only if it came out of parseSkin
+    skinRow("a-skin", userId, drawn.byHand, THEN);
+    skinRow("a-skin", userId, drawn.parsed, THEN);
+    const unparsed: Change = {
+      kind: "skin_drawn",
+      id: "a-skin",
+      ownerId: userId,
+      // @ts-expect-error — and only as a change if it did
+      skin: drawn.byHand,
+    };
+
+    // @ts-expect-error — a recipe that was parsed has still to have what it names looked up
+    const unresolved: Change = { kind: "look_chosen", userId, appearance: recipe };
+
+    return void [unknown, begun, ended, unparsed, unresolved];
   };
 
   it("is checked by tsc, where a directive with nothing to suppress is an error", () => {

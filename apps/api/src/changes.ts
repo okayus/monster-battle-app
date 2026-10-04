@@ -19,10 +19,28 @@
 import { eq } from "drizzle-orm";
 
 import type { BattleState, OngoingBattle, SaveData } from "@mba/core";
-import { battles, ownedMonsters, saves } from "@mba/db";
+import { appearances, battles, ownedMonsters, saves, skins } from "@mba/db";
 import type { Tx } from "@mba/db";
+import type { Appearance, Parsed, Skin } from "@mba/sprite";
 
 import type { UserId } from "./auth.js";
+import { skinRow } from "./skins.js";
+
+declare const resolved: unique symbol;
+
+/**
+ * A value whose references have been looked up: everything it names is in
+ * the database, and in use.
+ *
+ * Like the other marks (`UserId`, `Parsed`, `Checked`) it exists only in the
+ * type, and only a cast can put it there. Each such cast is the last line of
+ * the decision that did the looking — which is how the third of the three
+ * checks (shape, rules, references: docs/04-api-design.md) gets to be
+ * something a change can ask for. A change that takes a
+ * `Resolved<Checked<SpeciesInput>>` cannot be given a body that was only
+ * shape-checked: there is no way to write that down.
+ */
+export type Resolved<T> = T & { readonly [resolved]: true };
 
 export type Change =
   /**
@@ -37,7 +55,11 @@ export type Change =
   /** A turn was played: the battle is in this state now, at whatever stage that is. */
   | { kind: "battle_advanced"; id: string; state: BattleState }
   /** What a finished battle left its monster with: the two numbers that are stored. */
-  | { kind: "monster_settled"; id: string; exp: number; damage: number };
+  | { kind: "monster_settled"; id: string; exp: number; damage: number }
+  /** A player saved a drawing. It is a new skin: skins are never drawn over. */
+  | { kind: "skin_drawn"; id: string; ownerId: UserId; skin: Parsed<Skin> }
+  /** A player chose what to wear: the recipe, replacing the one before. */
+  | { kind: "look_chosen"; userId: UserId; appearance: Resolved<Parsed<Appearance>> };
 
 /**
  * A battle's state as its row holds it. `status` is one field of the state,
@@ -86,6 +108,26 @@ function apply(tx: Tx, change: Change, now: Date): void {
         .where(eq(ownedMonsters.id, change.id))
         .run();
       return;
+    case "skin_drawn":
+      tx.insert(skins)
+        .values(skinRow(change.id, change.ownerId, change.skin, now))
+        .run();
+      return;
+    case "look_chosen": {
+      // One row per user, so choosing again never adds a second.
+      const { skinId, parts, colours } = change.appearance;
+      const values = {
+        skinId,
+        partOverrides: JSON.stringify(parts),
+        colourOverrides: JSON.stringify(colours),
+        updatedAt: now,
+      };
+      tx.insert(appearances)
+        .values({ userId: change.userId, ...values })
+        .onConflictDoUpdate({ target: appearances.userId, set: values })
+        .run();
+      return;
+    }
     default:
       // Every kind is written above. A kind added to `Change` and not given
       // its SQL stops compiling on this line.
