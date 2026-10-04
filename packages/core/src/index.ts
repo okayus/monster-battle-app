@@ -735,6 +735,26 @@ export interface TurnOutcome {
 // screen can read the same limits it is about to be held to.
 // ---------------------------------------------------------------------------
 
+declare const checked: unique symbol;
+
+/**
+ * A value that satisfies the game's rules: what one of the `check…` functions
+ * below handed back, and nothing else.
+ *
+ * To the running program it is the value itself. The mark exists only in the
+ * type, and only a cast can put it there — and the casts are the last lines
+ * of those functions. So a function that asks for a `Checked<SpeciesInput>`
+ * cannot be handed one that merely has the right shape: that is a type error.
+ *
+ * It is the second of the three checks a piece of master data goes through
+ * (shape, rules, references: docs/04-api-design.md). The first has no mark,
+ * because a body of the wrong shape does not get to be a `SpeciesInput` at
+ * all. The third is marked by the API, which is the one that can look things
+ * up (`Resolved`). Whatever stores master data asks for the marks, so the
+ * order of the checks is not something a caller has to remember.
+ */
+export type Checked<T> = T & { readonly [checked]: true };
+
 /** True for a name with something in it and no more than `max` characters. */
 function isName(name: string, max: number): boolean {
   return name.trim().length > 0 && name.length <= max;
@@ -759,7 +779,7 @@ export interface MoveInput {
 export type MoveError = { kind: "bad_name" } | { kind: "bad_power"; power: number };
 
 /** The rules a move has to satisfy. */
-export function checkMove(input: MoveInput): Result<MoveInput, MoveError> {
+export function checkMove(input: MoveInput): Result<Checked<MoveInput>, MoveError> {
   if (!isName(input.name, MOVE_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
   // A power of zero is not a weak move. Every hit lands for at least 1
   // (`calcDamage`), so it would be a move that does the same whoever uses it
@@ -767,7 +787,7 @@ export function checkMove(input: MoveInput): Result<MoveInput, MoveError> {
   if (!isIntBetween(input.power, 1, MOVE_LIMITS.maxPower)) {
     return err({ kind: "bad_power", power: input.power });
   }
-  return ok(input);
+  return ok(input as Checked<MoveInput>);
 }
 
 export const SPECIES_LIMITS = {
@@ -799,7 +819,7 @@ export type SpeciesError =
  * decided here: that depends on what is in the database, which this package
  * cannot see.
  */
-export function checkSpecies(input: SpeciesInput): Result<SpeciesInput, SpeciesError> {
+export function checkSpecies(input: SpeciesInput): Result<Checked<SpeciesInput>, SpeciesError> {
   if (!isName(input.name, SPECIES_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
 
   for (const stat of ["maxHp", "attack", "defense"] as const) {
@@ -818,7 +838,7 @@ export function checkSpecies(input: SpeciesInput): Result<SpeciesInput, SpeciesE
     if (seen.has(moveId)) return err({ kind: "duplicate_move", moveId });
     seen.add(moveId);
   }
-  return ok(input);
+  return ok(input as Checked<SpeciesInput>);
 }
 
 export const MAP_LIMITS = {
@@ -873,7 +893,7 @@ export type MapError =
  * the map on the other side exists, and whether the tile there can be stood
  * on, depends on that other map.
  */
-export function checkMap(input: MapInput): Result<MapInput, MapError> {
+export function checkMap(input: MapInput): Result<Checked<MapInput>, MapError> {
   if (!isName(input.name, MAP_LIMITS.maxNameLength)) return err({ kind: "bad_name" });
 
   const { width, height } = input;
@@ -907,7 +927,7 @@ export function checkMap(input: MapInput): Result<MapInput, MapError> {
     if (taken.has(tile)) return err({ kind: "duplicate_exit", at });
     taken.add(tile);
   }
-  return ok(input);
+  return ok(input as Checked<MapInput>);
 }
 
 /** A skin, as much of it as a list needs: enough to name it and say whose it is. */

@@ -10,7 +10,7 @@ import {
   checkSpecies,
   exitAt,
 } from "./index.js";
-import type { MapInput, SpeciesInput, TileKind } from "./index.js";
+import type { Checked, MapInput, MoveInput, SpeciesInput, TileKind } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,6 +49,42 @@ function exitFrom(x: number, y: number) {
 }
 
 // ---------------------------------------------------------------------------
+
+describe("what the checks hand back", () => {
+  /** Stand in for whatever stores master data: each asks for a value that was checked. */
+  const keepMove = (move: Checked<MoveInput>): MoveInput => move;
+  const keepSpecies = (kind: Checked<SpeciesInput>): SpeciesInput => kind;
+  const keepMap = (map: Checked<MapInput>): MapInput => map;
+
+  it("is marked as checked, and is the value that was handed in", () => {
+    const move = { name: "ぶつかる", power: 5 };
+    const kind = speciesInput();
+    const map = mapInput();
+
+    const moveOk = checkMove(move);
+    const kindOk = checkSpecies(kind);
+    const mapOk = checkMap(map);
+    expect(moveOk.ok && keepMove(moveOk.value)).toBe(move);
+    expect(kindOk.ok && keepSpecies(kindOk.value)).toBe(kind);
+    expect(mapOk.ok && keepMap(mapOk.value)).toBe(map);
+  });
+
+  it("is the only thing that is: the right shape alone is not enough", () => {
+    // Nothing in this function runs. It is here for `tsc`, which fails on a
+    // `@ts-expect-error` with nothing to suppress: if a value that skipped
+    // its check could be passed where a checked one is asked for, the build
+    // stops here.
+    const attempts = (move: MoveInput, kind: SpeciesInput, map: MapInput): void => {
+      // @ts-expect-error — a move that was not checked
+      keepMove(move);
+      // @ts-expect-error — a species that was not checked
+      keepSpecies(kind);
+      // @ts-expect-error — a map that was not checked
+      keepMap(map);
+    };
+    expect(attempts).toBeTypeOf("function");
+  });
+});
 
 describe("checkMove", () => {
   it("accepts a move within the limits, and hands it back", () => {
