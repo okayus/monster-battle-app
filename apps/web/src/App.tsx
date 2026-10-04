@@ -12,14 +12,14 @@
  * built in.
  */
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, use, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
 import { BattleScreen } from "./BattleScreen.js";
 import { fromSkin, newEditor } from "./editor/model.js";
 import { SkinEditor } from "./editor/SkinEditor.js";
 import { LookScreen } from "./look/LookScreen.js";
-import { MapScreen } from "./MapScreen.js";
+import { MapScreen } from "./map/MapScreen.js";
 import { MonstersScreen } from "./MonstersScreen.js";
 import { hrefs, parseRoute } from "./route.js";
 import type { Route } from "./route.js";
@@ -40,6 +40,22 @@ function useRoute(): Route {
   return parseRoute(hash);
 }
 
+/**
+ * Proves the Vite dev server's /api proxy reaches the Hono process. Like the
+ * calls in api.ts it never rejects: not reaching the API is something to
+ * show, so it is a value.
+ */
+function checkHealth(): Promise<string> {
+  return fetch("/api/health")
+    .then((r) => r.json())
+    .then((body: { status: string }) => body.status)
+    .catch((e: unknown) => `unreachable: ${String(e)}`);
+}
+
+function Health({ from }: { from: Promise<string> }) {
+  return <strong>{use(from)}</strong>;
+}
+
 const page: CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   padding: "2rem",
@@ -51,19 +67,11 @@ const nav: CSSProperties = { display: "flex", gap: "1.5rem" };
 const columns: CSSProperties = { display: "flex", gap: "3rem", flexWrap: "wrap" };
 
 export function App() {
-  const [health, setHealth] = useState<string>("...");
+  const [health] = useState(checkHealth);
   const route = useRoute();
   // The drawing in progress is kept up here, above the screens, so that a look
   // at the map does not throw it away. It does not survive a reload.
   const [editor, setEditor] = useState(newEditor);
-
-  useEffect(() => {
-    // Proves the Vite dev server's /api proxy reaches the Hono process.
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then((body: { status: string }) => setHealth(body.status))
-      .catch((e: unknown) => setHealth(`unreachable: ${String(e)}`));
-  }, []);
 
   return (
     <main style={page}>
@@ -83,7 +91,10 @@ export function App() {
         </a>
       </nav>
       <p>
-        API 疎通: <strong>{health}</strong>
+        API 疎通:{" "}
+        <Suspense fallback={<strong>...</strong>}>
+          <Health from={health} />
+        </Suspense>
       </p>
 
       {route.screen === "map" && <MapScreen />}
