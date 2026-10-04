@@ -28,6 +28,17 @@ export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
  */
 export type DbOrTx = Db | Tx;
 
+/**
+ * A database that can only be asked, not told: `select`, and nothing else.
+ *
+ * Both a `Db` and a `Tx` fit, so the same query runs on its own or inside a
+ * transaction. What does not fit is a call to `insert`, `update` or `delete`
+ * on one of these: a function that is handed a `Read` cannot write, and its
+ * signature says so. The API gives its routes nothing but this
+ * (docs/04-api-design.md §層の分け方).
+ */
+export type Read = Pick<Db, "select">;
+
 /** `file:./data/app.db` and `./data/app.db` are both accepted. */
 function toFilePath(databaseUrl: string): string {
   return databaseUrl.startsWith("file:") ? databaseUrl.slice("file:".length) : databaseUrl;

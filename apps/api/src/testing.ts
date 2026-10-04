@@ -9,6 +9,7 @@ import { createDb, runMigrations } from "@mba/db";
 
 import { createApp } from "./app.js";
 import { START_MAP_ID, starterMap } from "./maps.js";
+import type { Sources } from "./runtime.js";
 import { seed } from "./seed.js";
 
 /**
@@ -18,14 +19,19 @@ import { seed } from "./seed.js";
  *
  * `random` stands in for the server's random numbers. It is fixed by default,
  * so a test that does not care about them still gets the same result every run.
+ * The clock and the ids are the real ones unless a test says what they are.
  */
-export function setup(options: { random?: () => number } = {}) {
+export function setup(options: Partial<Sources> = {}) {
   const db = createDb(":memory:");
   const { applied } = runMigrations(db);
   const seeded = seed(db);
   if (!seeded.ok) throw new Error(`the seed data is invalid: ${JSON.stringify(seeded.error)}`);
-  const random = options.random ?? (() => 0.5);
-  return { db, applied, app: createApp({ db, migrationsApplied: applied, random }) };
+  const sources: Sources = {
+    random: options.random ?? (() => 0.5),
+    now: options.now ?? (() => new Date()),
+    newId: options.newId ?? (() => crypto.randomUUID()),
+  };
+  return { db, applied, app: createApp({ db, migrationsApplied: applied, ...sources }) };
 }
 
 export type TestApp = ReturnType<typeof setup>["app"];

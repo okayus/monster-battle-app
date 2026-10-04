@@ -34,8 +34,15 @@ if (!seeded.ok) {
   process.exit(1);
 }
 
-// The one place the real random number generator is named.
-const app = createApp({ db, migrationsApplied: applied, random: Math.random });
+// The one place the real random number generator, the real clock and the real
+// id generator are named. Everything below this file is handed them.
+const app = createApp({
+  db,
+  migrationsApplied: applied,
+  random: Math.random,
+  now: () => new Date(),
+  newId: () => crypto.randomUUID(),
+});
 
 if (process.env.NODE_ENV === "production") {
   // One container, one port: the API also serves both SPA builds.

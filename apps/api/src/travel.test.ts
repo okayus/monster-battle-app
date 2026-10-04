@@ -210,6 +210,24 @@ describe("POST /api/travel", () => {
     expect(await refusal(travel(app))).toEqual({ status: 500, error: { kind: "broken_exit" } });
     expect(await saved(app)).toEqual({ mapId: START_MAP_ID, position: DOOR });
   });
+
+  it("answers 500 wherever a position is needed, if the starter map itself is gone", async () => {
+    const { app, db } = setup();
+    const elsewhere = await createMap(app, pond());
+    // What the admin API refuses to do (the starter map is protected), done to
+    // the table directly. With no starter map there is nowhere a player
+    // without a save could be — and that is a fault on this side, not
+    // something wrong with the request.
+    db.update(maps).set({ retiredAt: new Date() }).where(eq(maps.id, START_MAP_ID)).run();
+
+    const gone = { status: 500, error: { kind: "no_start_map" } };
+    expect(await refusal(app.request("/api/save"))).toEqual(gone);
+    expect(await refusal(putSave(app, { mapId: elsewhere, position: { x: 1, y: 1 } }))).toEqual(
+      gone,
+    );
+    expect(await refusal(travel(app))).toEqual(gone);
+    expect(await refusal(app.request("/api/battles", { method: "POST" }))).toEqual(gone);
+  });
 });
 
 describe("PUT /api/save, now that there is more than one map to be on", () => {

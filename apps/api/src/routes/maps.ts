@@ -9,16 +9,17 @@
 
 import { Hono } from "hono";
 
-import type { Db } from "@mba/db";
+import type { Read } from "@mba/db";
 
 import { findMap } from "../maps.js";
+import { refuse } from "../refusals.js";
 
-export function mapRoutes(db: Db) {
+export function mapRoutes(read: Read) {
   const routes = new Hono();
 
   routes.get("/:id", (c) => {
-    const map = findMap(db, c.req.param("id"));
-    if (map === undefined) return c.json({ error: { kind: "not_found" } }, 404);
+    const map = findMap(read, c.req.param("id"));
+    if (map === undefined) return refuse(c, { kind: "not_found" });
     return c.json(map);
   });
 

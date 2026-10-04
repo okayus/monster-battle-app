@@ -4,6 +4,11 @@
  *
  * Handlers do not catch exceptions. The places where a library throws on bad
  * input are wrapped here, once, and come out as a `Result`.
+ *
+ * Reading a body is also the only thing a handler waits for. Everything after
+ * it — reading the database, deciding, writing — is synchronous
+ * (runtime.ts), so the `await` in front of `readBody` is the last one in any
+ * route.
  */
 
 import type { Context } from "hono";
@@ -12,6 +17,11 @@ import type { z } from "zod";
 
 import { err, ok } from "@mba/core";
 import type { Result } from "@mba/core";
+
+import { refuse } from "./refusals.js";
+
+/** What can be wrong with a body before anyone has asked what it means. */
+export type BodyError = { kind: "bad_json" } | { kind: "malformed"; at: string };
 
 /** `c.req.json()` throws on a body that is not JSON. Here that becomes a value. */
 export async function readJson(c: Context): Promise<Result<unknown, { kind: "bad_json" }>> {
@@ -32,7 +42,7 @@ export async function readJson(c: Context): Promise<Result<unknown, { kind: "bad
 export function jsonBodyLimit(maxBytes: number) {
   return bodyLimit({
     maxSize: maxBytes,
-    onError: (c) => c.json({ error: { kind: "body_too_large", max: maxBytes } }, 413),
+    onError: (c) => refuse(c, { kind: "body_too_large", max: maxBytes }),
   });
 }
 
@@ -58,4 +68,15 @@ export function parseShape<T>(
   const parsed = schema.safeParse(value);
   if (parsed.success) return ok(parsed.data);
   return err({ kind: "malformed", at: pathOf(parsed.error.issues[0]?.path ?? []) });
+}
+
+/**
+ * A request body as a value of the schema's shape: `readJson`, then
+ * `parseShape`. What most routes that take a body start with. (Skins and
+ * looks do not: their shape is described by `@mba/sprite`, not by a schema.)
+ */
+export async function readBody<T>(c: Context, schema: z.ZodType<T>): Promise<Result<T, BodyError>> {
+  const body = await readJson(c);
+  if (!body.ok) return body;
+  return parseShape(schema, body.value);
 }

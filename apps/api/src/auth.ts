@@ -16,12 +16,27 @@ import { eq } from "drizzle-orm";
 import type { Context, MiddlewareHandler } from "hono";
 
 import { users } from "@mba/db";
-import type { Db } from "@mba/db";
+import type { Db, Read } from "@mba/db";
+
+declare const vouchedFor: unique symbol;
+
+/**
+ * A user id that this file vouches for.
+ *
+ * To the running program it is a plain string. The mark exists only in the
+ * type, and only a cast can put it there — and the one cast is below. So a
+ * function that asks for a `UserId` cannot be handed `body.userId`, or an id
+ * out of a path, or any other string a request happened to carry: that is a
+ * type error. "Whose data is this" is answered by this file or the code does
+ * not compile, which is the rule in the paragraph above, held by the type
+ * checker instead of by whoever reviews the next handler.
+ */
+export type UserId = string & { readonly [vouchedFor]: true };
 
 /** The single user this app has, until there is a way to tell users apart. */
-export const LOCAL_USER_ID = "local";
+export const LOCAL_USER_ID = "local" as UserId;
 
-export function getUserId(_c: Context): string {
+export function getUserId(_c: Context): UserId {
   return LOCAL_USER_ID;
 }
 
@@ -52,9 +67,9 @@ export function ensureLocalUser(db: Db): void {
  * routes/admin.ts), not to each route — so a route added later cannot be left
  * unguarded by forgetting a line.
  */
-export function requireAdmin(db: Db): MiddlewareHandler {
+export function requireAdmin(read: Read): MiddlewareHandler {
   return async (c, next) => {
-    const user = db
+    const user = read
       .select({ isAdmin: users.isAdmin })
       .from(users)
       .where(eq(users.id, getUserId(c)))

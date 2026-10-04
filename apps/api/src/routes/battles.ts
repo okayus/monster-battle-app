@@ -40,10 +40,11 @@ import type { Db } from "@mba/db";
 
 import { getUserId } from "../auth.js";
 import { ongoingBattleOf, stateOf } from "../battles.js";
+import { commit } from "../changes.js";
 import { jsonBodyLimit, parseShape, readJson } from "../http.js";
 import { findMap } from "../maps.js";
 import { encountersOn, leadMonsterOf } from "../monsters.js";
-import { loadSave, startingPoint, storeSave } from "../saves.js";
+import { loadSave, startingPoint } from "../saves.js";
 
 /** A turn is a move id and a number. */
 const MAX_TURN_BYTES = 1024;
@@ -198,7 +199,7 @@ export function battleRoutes(db: Db, random: () => number) {
       // Losing costs the player where they had got to. Like every other change
       // of position that matters, it is the server that makes it; the battle
       // screen is only told the battle was lost.
-      if (home !== undefined) storeSave(tx, userId, home, now);
+      if (home !== undefined) commit(tx, [{ kind: "player_placed", userId, at: home }], now);
     });
 
     const outcome: TurnOutcome = { battle: viewBattle(row.id, next), events };

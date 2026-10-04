@@ -21,7 +21,7 @@ import type {
   TileKind,
 } from "@mba/core";
 import { mapEncounters, mapExits, maps } from "@mba/db";
-import type { Db, MapRow } from "@mba/db";
+import type { Db, MapRow, Read } from "@mba/db";
 
 /** The map a player with no save starts on. */
 export const START_MAP_ID = "start";
@@ -45,8 +45,8 @@ function toGameMap(row: MapRow, exits: MapExit[]): GameMap {
 }
 
 /** The ways out of a map, in reading order: top row first, left to right. */
-function exitsOf(db: Db, mapId: string): MapExit[] {
-  return db
+function exitsOf(read: Read, mapId: string): MapExit[] {
+  return read
     .select()
     .from(mapExits)
     .where(eq(mapExits.mapId, mapId))
@@ -67,21 +67,21 @@ function exitsOf(db: Db, mapId: string): MapExit[] {
  * was made on a map since retired then finds no map, and `loadSave` already
  * knows what to do with that.
  */
-export function findMap(db: Db, id: string): GameMap | undefined {
-  const row = db
+export function findMap(read: Read, id: string): GameMap | undefined {
+  const row = read
     .select()
     .from(maps)
     .where(and(eq(maps.id, id), isNull(maps.retiredAt)))
     .get();
-  return row === undefined ? undefined : toGameMap(row, exitsOf(db, id));
+  return row === undefined ? undefined : toGameMap(row, exitsOf(read, id));
 }
 
 // ---------------------------------------------------------------------------
 // What the admin API reads and writes
 // ---------------------------------------------------------------------------
 
-function encounterRowsOf(db: Db, mapId: string): Encounter[] {
-  return db
+function encounterRowsOf(read: Read, mapId: string): Encounter[] {
+  return read
     .select({ speciesId: mapEncounters.speciesId, weight: mapEncounters.weight })
     .from(mapEncounters)
     .where(eq(mapEncounters.mapId, mapId))
@@ -94,12 +94,12 @@ function encounterRowsOf(db: Db, mapId: string): Encounter[] {
  * maps included, with the mark: an admin has to be able to see one to bring it
  * back.
  */
-export function findAdminMap(db: Db, id: string): AdminMap | undefined {
-  const row = db.select().from(maps).where(eq(maps.id, id)).get();
+export function findAdminMap(read: Read, id: string): AdminMap | undefined {
+  const row = read.select().from(maps).where(eq(maps.id, id)).get();
   if (row === undefined) return undefined;
   return {
-    ...toGameMap(row, exitsOf(db, id)),
-    encounters: encounterRowsOf(db, id),
+    ...toGameMap(row, exitsOf(read, id)),
+    encounters: encounterRowsOf(read, id),
     retired: row.retiredAt !== null,
   };
 }
@@ -119,8 +119,8 @@ export interface IncomingExit {
  * another map's data. Retired maps count too, so that bringing one back never
  * has to ask this question again.
  */
-export function exitsInto(db: Db, mapId: string): IncomingExit[] {
-  return db
+export function exitsInto(read: Read, mapId: string): IncomingExit[] {
+  return read
     .select({ id: maps.id, name: maps.name, toX: mapExits.toX, toY: mapExits.toY })
     .from(mapExits)
     .innerJoin(maps, eq(mapExits.mapId, maps.id))
@@ -133,12 +133,12 @@ export function exitsInto(db: Db, mapId: string): IncomingExit[] {
     }));
 }
 
-export function listMaps(db: Db): AdminMap[] {
-  const ids = db.select({ id: maps.id }).from(maps).orderBy(asc(maps.name), asc(maps.id)).all();
+export function listMaps(read: Read): AdminMap[] {
+  const ids = read.select({ id: maps.id }).from(maps).orderBy(asc(maps.name), asc(maps.id)).all();
 
   const all: AdminMap[] = [];
   for (const { id } of ids) {
-    const found = findAdminMap(db, id);
+    const found = findAdminMap(read, id);
     if (found !== undefined) all.push(found);
   }
   return all;

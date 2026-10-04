@@ -25,31 +25,39 @@ import { monsterRoutes } from "./routes/monsters.js";
 import { saveRoutes } from "./routes/save.js";
 import { skinRoutes } from "./routes/skins.js";
 import { travelRoutes } from "./routes/travel.js";
+import { createRuntime } from "./runtime.js";
+import type { Sources } from "./runtime.js";
 
-export interface AppDeps {
+/**
+ * `random`, `now` and `newId` are the three things that differ from one run to
+ * the next (see `Sources`). The app is handed them instead of reaching for
+ * them: `Math.random`, the clock and the id generator when it is really
+ * running, whatever a test wants them to say in a test. Decisions draw from
+ * these and pass the values on; nothing in `@mba/core` draws its own.
+ */
+export interface AppDeps extends Sources {
   db: Db;
   /** Reported by /api/health, so a boot that migrated is visible from outside. */
   migrationsApplied: number;
-  /**
-   * Where the server's random numbers come from: `Math.random` when it is
-   * really running, a scripted sequence in tests. Handlers draw from this and
-   * pass the numbers on; nothing in `@mba/core` draws its own.
-   */
-  random: () => number;
 }
 
-export function createApp({ db, migrationsApplied, random }: AppDeps) {
+export function createApp({ db, migrationsApplied, ...sources }: AppDeps) {
   const app = new Hono();
+
+  // From here down, the routes that have been moved to the new shape get this
+  // and not the database: a way to read, and a way to have a decision carried
+  // out (runtime.ts).
+  const runtime = createRuntime(db, sources);
 
   app.get("/api/health", (c) => c.json({ status: "ok", migrationsApplied }));
 
   app.route("/api/skins", skinRoutes(db));
-  app.route("/api/maps", mapRoutes(db));
-  app.route("/api/save", saveRoutes(db));
-  app.route("/api/travel", travelRoutes(db));
+  app.route("/api/maps", mapRoutes(runtime.read));
+  app.route("/api/save", saveRoutes(runtime));
+  app.route("/api/travel", travelRoutes(runtime));
   app.route("/api/appearance", appearanceRoutes(db));
   app.route("/api/monsters", monsterRoutes(db));
-  app.route("/api/battles", battleRoutes(db, random));
+  app.route("/api/battles", battleRoutes(db, sources.random));
 
   // Everything under this prefix goes through one authorization check, which
   // the admin router attaches to itself.
