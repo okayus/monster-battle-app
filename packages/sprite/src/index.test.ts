@@ -21,6 +21,7 @@ import type {
   CellGrid,
   Frame,
   PaletteEntry,
+  Parsed,
   PartSlot,
   Rect,
   RenderableSkin,
@@ -143,7 +144,7 @@ function rejection(input: unknown): SkinError {
   return result.error;
 }
 
-function accepted(input: unknown): Skin {
+function accepted(input: unknown): Parsed<Skin> {
   const result = parseSkin(input);
   if (!result.ok)
     throw new Error(`expected parseSkin to accept, got ${JSON.stringify(result.error)}`);
@@ -279,6 +280,26 @@ describe("parseSkin", () => {
     expect(skin.palette).toEqual(VALID_PALETTE);
     expect(skin.parts.map((part) => part.slot)).toEqual([...PART_SLOTS]);
     expect(() => toRenderable(skin)).not.toThrow();
+  });
+
+  it("marks what it hands back as parsed, which nothing else can be", () => {
+    /** Stands in for anything that stores a skin: it asks for one that was parsed. */
+    const store = (skin: Parsed<Skin>): Skin => skin;
+
+    const skin = accepted(validInput());
+    expect(store(skin)).toBe(skin);
+
+    // Nothing below this line runs. It is here for `tsc`, which fails on a
+    // `@ts-expect-error` with nothing to suppress: if a skin that did not come
+    // out of `parseSkin` could ever be passed where a parsed one is asked for,
+    // the build stops here.
+    const attempts = (byHand: Skin, body: unknown): void => {
+      // @ts-expect-error — a Skin that was not parsed is not a Parsed<Skin>
+      store(byHand);
+      // @ts-expect-error — and a request body certainly is not
+      store(body);
+    };
+    expect(attempts).toBeTypeOf("function");
   });
 
   it("puts parts back in draw order however they arrived", () => {
@@ -627,7 +648,7 @@ function appearanceRejection(input: unknown): AppearanceError {
   return result.error;
 }
 
-function acceptedAppearance(input: unknown): Appearance {
+function acceptedAppearance(input: unknown): Parsed<Appearance> {
   const result = parseAppearance(input);
   if (!result.ok) {
     throw new Error(`expected parseAppearance to accept, got ${JSON.stringify(result.error)}`);
@@ -642,6 +663,20 @@ describe("parseAppearance", () => {
       parts: { hair: "skin-b" },
       colours: [{ id: "hair", hex: "#cc3344" }],
     });
+  });
+
+  it("marks what it hands back as parsed, as parseSkin does", () => {
+    const keep = (appearance: Parsed<Appearance>): Appearance => appearance;
+
+    const recipe = acceptedAppearance(validAppearance());
+    expect(keep(recipe)).toBe(recipe);
+
+    // Never called: checked by `tsc`, as in the test for parseSkin above.
+    const attempts = (byHand: Appearance): void => {
+      // @ts-expect-error — a recipe that was not parsed is not a Parsed<Appearance>
+      keep(byHand);
+    };
+    expect(attempts).toBeTypeOf("function");
   });
 
   it("accepts the plainest recipe there is: a skin, worn as drawn", () => {

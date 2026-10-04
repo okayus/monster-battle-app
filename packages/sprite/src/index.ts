@@ -220,6 +220,24 @@ function toRects(grid: CellGrid): Rect[] {
 // Validation — the trust boundary
 // ---------------------------------------------------------------------------
 
+declare const parsed: unique symbol;
+
+/**
+ * A value that came out of one of this package's `parse…` functions.
+ *
+ * To the running program it is the value itself. The mark exists only in the
+ * type, and only a cast can put it there — and the two casts are the last
+ * lines of `parseSkin` and `parseAppearance`. So a function that asks for a
+ * `Parsed<Skin>` cannot be handed a request body, a `Skin` built by hand, or
+ * one that came from anywhere but the boundary: that is a type error.
+ *
+ * "Nothing is stored that did not go through `parseSkin`" was a rule about
+ * how callers behave. With this it is a fact about what compiles. And since
+ * the mark stays on the value, nothing downstream needs to check again in
+ * order to be sure.
+ */
+export type Parsed<T> = T & { readonly [parsed]: true };
+
 export type SkinError =
   /** Wrong type or wrong shape. `at` is a path into the input, for the message. */
   | { kind: "malformed"; at: string }
@@ -250,7 +268,7 @@ function isInt(value: unknown): value is number {
  * The returned Skin is rebuilt field by field rather than cast or spread, so
  * properties the caller did not ask about cannot ride along into storage.
  */
-export function parseSkin(input: unknown): Result<Skin, SkinError> {
+export function parseSkin(input: unknown): Result<Parsed<Skin>, SkinError> {
   // Size first, on the canonical serialization — that is what actually gets
   // stored, and it bounds every loop below.
   const json: string | undefined = safeStringify(input);
@@ -277,7 +295,9 @@ export function parseSkin(input: unknown): Result<Skin, SkinError> {
   const parts = parseParts(input.parts, palette.value.length);
   if (!parts.ok) return parts;
 
-  return ok({ formatVersion: 1, name, palette: palette.value, parts: parts.value });
+  const skin: Skin = { formatVersion: 1, name, palette: palette.value, parts: parts.value };
+  // The one place a Skin is marked as parsed.
+  return ok(skin as Parsed<Skin>);
 }
 
 /**
@@ -543,7 +563,7 @@ function isSkinId(value: unknown): value is string {
  * As with `parseSkin`, the result is rebuilt field by field, so nothing the
  * validator did not look at can ride along into storage.
  */
-export function parseAppearance(input: unknown): Result<Appearance, AppearanceError> {
+export function parseAppearance(input: unknown): Result<Parsed<Appearance>, AppearanceError> {
   if (!isObject(input)) return err({ kind: "malformed", at: "$" });
 
   const skinId = input.skinId;
@@ -592,7 +612,9 @@ export function parseAppearance(input: unknown): Result<Appearance, AppearanceEr
     colours.push({ id, hex });
   }
 
-  return ok({ skinId, parts, colours });
+  const appearance: Appearance = { skinId, parts, colours };
+  // The one place an Appearance is marked as parsed.
+  return ok(appearance as Parsed<Appearance>);
 }
 
 /** The skins a recipe names, each once: the worn one first, then the parts' in draw order. */
