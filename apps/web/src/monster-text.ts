@@ -3,7 +3,7 @@
  *
  * The API sends where the next level begins as a number, or null when there
  * is none, and says nothing about how to put that (the same split as
- * battle-log.ts). The wording lives here, on the side that shows it.
+ * battle/log.ts). The wording lives here, on the side that shows it.
  */
 
 import type { MonsterView } from "@mba/core";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeEvent } from "./battle-log.js";
+import { describeEvent } from "./log.js";
 
 const names = { player: "モリダマ", enemy: "やせいの ヌマダマ" };
 

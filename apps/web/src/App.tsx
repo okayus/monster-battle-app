@@ -15,7 +15,7 @@
 import { Suspense, use, useState, useSyncExternalStore } from "react";
 import type { CSSProperties } from "react";
 
-import { BattleScreen } from "./BattleScreen.js";
+import { BattleScreen } from "./battle/BattleScreen.js";
 import { fromSkin, newEditor } from "./editor/model.js";
 import { SkinEditor } from "./editor/SkinEditor.js";
 import { LookScreen } from "./look/LookScreen.js";

@@ -9,60 +9,64 @@
  * the link is what it went in with; what it has left is the battle's to say.
  */
 
-import { useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import type { CSSProperties } from "react";
 
-import type { MonsterView } from "@mba/core";
+import { ok } from "@mba/core";
+import type { MonsterView, Result } from "@mba/core";
 
-import { fetchMonsters } from "./api.js";
+import { fetchMonsters, fetchSkin } from "./api.js";
 import type { ApiError } from "./api.js";
+import { Loaded } from "./loaded.js";
 import { describeProgress } from "./monster-text.js";
 import { MonsterSprite } from "./MonsterSprite.js";
+import type { Picture } from "./MonsterSprite.js";
 import { hrefs } from "./route.js";
 
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "failed"; error: ApiError }
-  | { kind: "ready"; monsters: MonsterView[] };
+/** A monster, and its picture on the way. */
+interface Owned {
+  monster: MonsterView;
+  picture: Picture;
+}
+
+async function load(): Promise<Result<Owned[], ApiError>> {
+  const monsters = await fetchMonsters();
+  if (!monsters.ok) return monsters;
+  // The pictures are asked for here, as soon as it is known which skins they
+  // are, and not by the sprites that will show them: see MonsterSprite.tsx.
+  return ok(monsters.value.map((monster) => ({ monster, picture: fetchSkin(monster.skinId) })));
+}
 
 export function MonstersScreen() {
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+  const [loading] = useState(load);
 
-  useEffect(() => {
-    let cancelled = false;
-    void fetchMonsters().then((result) => {
-      // The request can outlive the component (and StrictMode's first mount).
-      if (cancelled) return;
-      setState(
-        result.ok
-          ? { kind: "ready", monsters: result.value }
-          : { kind: "failed", error: result.error },
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  return (
+    <Suspense fallback={<p>読み込み中…</p>}>
+      <Loaded
+        from={loading}
+        failed={(error) => (
+          <section aria-label="なかま">
+            <p role="alert">なかまを読み込めなかった（{error.kind}）</p>
+          </section>
+        )}
+      >
+        {(owned) => <Monsters owned={owned} />}
+      </Loaded>
+    </Suspense>
+  );
+}
 
-  if (state.kind === "loading") return <p>読み込み中…</p>;
-  if (state.kind === "failed") {
-    return (
-      <section aria-label="なかま">
-        <p role="alert">なかまを読み込めなかった（{state.error.kind}）</p>
-      </section>
-    );
-  }
-
+function Monsters({ owned }: { owned: Owned[] }) {
   return (
     <section aria-label="なかま">
       <h2>なかま</h2>
-      {state.monsters.length === 0 ? (
+      {owned.length === 0 ? (
         <p>なかまは まだいない。</p>
       ) : (
         <ul style={list} aria-label="なかまの一覧">
-          {state.monsters.map((monster) => (
+          {owned.map(({ monster, picture }) => (
             <li key={monster.id} style={card}>
-              <Monster monster={monster} />
+              <Monster monster={monster} picture={picture} />
             </li>
           ))}
         </ul>
@@ -90,10 +94,10 @@ const card: CSSProperties = { display: "flex", gap: "1rem", alignItems: "flex-st
 
 const facts: CSSProperties = { display: "grid", gap: "0.25rem", justifyItems: "start" };
 
-function Monster({ monster }: { monster: MonsterView }) {
+function Monster({ monster, picture }: { monster: MonsterView; picture: Picture }) {
   return (
     <>
-      <MonsterSprite skinId={monster.skinId} />
+      <MonsterSprite picture={picture} />
       <div style={facts}>
         <span>
           <strong>{monster.name}</strong> <span data-level>Lv {monster.level}</span>
